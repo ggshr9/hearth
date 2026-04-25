@@ -115,7 +115,9 @@ Channels (consumable, swappable)
 - [x] v0.1.2 claim verification + query (no-grounding → literal "no answer found in vault") + lint (citation-drift / single-source-stable / orphan / raw append-only)
 - [x] v0.1.3 AgentAdapter + Claude integration (mock + claude both selectable via --agent; malformed plans rejected before pending)
 - [ ] v0.2 pending review + diff + rebase
-- [ ] v0.3 wechat-cc → hearth channel adapter
+- [x] v0.3.0 channel adapter spike — runtime API + channel-inbox materialize + 4 tests (no vault writes from inbound; malformed plans still rejected)
+- [ ] v0.3.1 owner-only `/hearth` command surface over WeChat
+- [ ] v0.3.2 wechat-cc end-to-end demo (capture → pending → approve → query)
 - [ ] v0.4 voice memo capture
 - [ ] v0.5 multi-format extractors
 

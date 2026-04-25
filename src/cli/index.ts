@@ -19,6 +19,7 @@ import { validateChangePlan, PlanValidationError } from '../core/plan-validator.
 import type { AgentAdapter } from '../core/agent-adapter.ts';
 import { query, NO_ANSWER } from '../core/query.ts';
 import { lint } from '../core/lint.ts';
+import { ingestFromChannel } from '../runtime.ts';
 
 function fail(msg: string): never {
   process.stderr.write(`hearth: ${msg}\n`);
@@ -250,6 +251,41 @@ function cmdLint(positionals: string[], values: Record<string, string | boolean 
   if (hasError) process.exit(1);
 }
 
+async function cmdChannel(positionals: string[], values: Record<string, string | boolean | undefined>): Promise<void> {
+  const sub = positionals[0];
+  if (sub !== 'ingest') fail(`channel: unknown subcommand "${sub}". expected: ingest`);
+
+  const channel = (values.channel as string) ?? 'cli';
+  const messageId = (values['message-id'] as string) ?? `cli-${Date.now()}`;
+  const from = (values.from as string) ?? 'cli-user';
+  const text = (values.text as string) ?? '';
+  const url = values.url as string | undefined;
+  if (!text && !url) fail('channel ingest: need --text "..." or --url <url>');
+
+  const vault = resolve((values.vault as string) ?? process.cwd());
+  const agent = ((values.agent as string) ?? 'mock') as 'mock' | 'claude';
+  const result = await ingestFromChannel(
+    {
+      channel,
+      message_id: messageId,
+      from,
+      ...(text ? { text } : {}),
+      ...(url ? { url } : {}),
+      received_at: new Date().toISOString(),
+    },
+    { vaultRoot: vault, agent },
+  );
+
+  if (!result.ok) {
+    process.stderr.write(`✗ ${result.summary}\n`);
+    if (result.error) process.stderr.write(`  ${result.error.split('\n').join('\n  ')}\n`);
+    process.exit(1);
+  }
+  process.stdout.write(`✓ ${result.summary}\n`);
+  process.stdout.write(`  source materialized: ${result.source_path}\n`);
+  process.stdout.write(`  pending: ${result.pending_path}\n`);
+}
+
 function help(): void {
   process.stdout.write(`hearth v0.1.0-alpha
 
@@ -261,6 +297,7 @@ usage:
   hearth pending apply <change_id> [--vault <dir>]
   hearth query "<question>" [--vault <dir>]
   hearth lint [--vault <dir>]
+  hearth channel ingest --channel <name> --message-id <id> --from <id> --text "..." [--vault <dir>] [--agent mock|claude]
 
 This is the v0.1 deterministic core loop. No LLM yet — mock ingest produces
 ChangePlans; kernel enforces SCHEMA.md permissions + preconditions on apply.
@@ -280,6 +317,11 @@ function main(): void {
       template: { type: 'string' },
       force: { type: 'boolean' },
       agent: { type: 'string' },
+      channel: { type: 'string' },
+      'message-id': { type: 'string' },
+      from: { type: 'string' },
+      text: { type: 'string' },
+      url: { type: 'string' },
     },
     allowPositionals: true,
     strict: false,
@@ -290,6 +332,7 @@ function main(): void {
     case 'pending': return cmdPending(positionals, values);
     case 'query': return cmdQuery(positionals, values);
     case 'lint': return cmdLint(positionals, values);
+    case 'channel': void cmdChannel(positionals, values); return;
     case 'help': return help();
     default: fail(`unknown command: ${cmd}. run "hearth help"`);
   }

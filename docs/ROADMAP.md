@@ -67,16 +67,54 @@ Risk classification (`low | medium | high`) drives default behaviour; user can c
 
 ---
 
-## v0.3 — WeChat channel adapter
+## v0.3 — WeChat channel adapter (3 substages)
 
-The first non-CLI channel. The differentiator: capture happens where you are (your phone), not where you wish you were (at your desk).
+The first non-CLI channel. The differentiator: capture happens where you are
+(your phone), not where you wish you were (at your desk).
 
-- WeChat ilink-bot integration (rewires `wechat-cc` to depend on `hearth`)
-- Inbound text / link / image / file routes through `hearth ingest`
-- All wiki writes still gated by `_pending/`
-- WeChat receives back `hearth query` answers
+### v0.3.0 — channel adapter spike (inbound → pending)
 
-**Done when**: you can forward a B站 link in WeChat, get a `ChangePlan` summary back, approve, and the wiki has a new source-summary page.
+The minimum that proves channel adapters are entry points, not bypasses.
+
+- New runtime API: `ingestFromChannel(InboundMsg, opts) → ChannelIngestResult`
+- Inbound text materializes to `~/.hearth/channel-inbox/<channel>/<msg-id>.md`
+- Plan goes through the existing AgentAdapter → validator → pending pipeline
+- Channel reply: `pending ChangePlan <id> · risk=<low|med|high> · N ops · review=...`
+
+What this stage deliberately does NOT include:
+- approve / apply via the channel (control-vs-content boundary needs its own design)
+- URL fetch (deferred to v0.5)
+- file / image / voice attachments
+- multi-user authorization
+
+**Done when**: simulated WeChat text via `hearth channel ingest` produces a
+pending ChangePlan, vault is untouched, malformed agent output is still
+rejected by the validator (channels are entry points, not new backdoors).
+
+### v0.3.1 — owner-only command surface
+
+- `/hearth list` / `/hearth show <id>` / `/hearth apply <id>` over WeChat
+- Owner allowlist: only configured WeChat user_id may approve / apply
+- Non-allowlisted senders may capture, may not commit
+
+### v0.3.2 — mobile demo closure
+
+- Send WeChat content → channel ingests → pending → user approves in WeChat
+- Vault apply → hearth query in WeChat returns grounded claim
+- This is when the channel-first differentiation is end-to-end demoable.
+
+### Wiring on the wechat-cc side
+
+`wechat-cc` (the existing daemon) gains a hearth import:
+
+```
+wechat onInbound (text/link)
+  → ingestFromChannel({ channel: 'wechat', message_id, from, text }, { vaultRoot, agent: 'claude' })
+  → reply with result.summary
+```
+
+Wechat-cc continues to live in its own repo; hearth exposes the runtime API
+so wechat-cc imports rather than shells out.
 
 ---
 
