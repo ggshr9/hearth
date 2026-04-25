@@ -20,6 +20,8 @@ import type { AgentAdapter } from '../core/agent-adapter.ts';
 import { query, NO_ANSWER } from '../core/query.ts';
 import { lint } from '../core/lint.ts';
 import { ingestFromChannel } from '../runtime.ts';
+import { buildProposal, applyProposal, renderProposalSummary } from './adopt.ts';
+import { runDoctor, renderDoctorReport } from './doctor.ts';
 
 function fail(msg: string): never {
   process.stderr.write(`hearth: ${msg}\n`);
@@ -286,6 +288,39 @@ async function cmdChannel(positionals: string[], values: Record<string, string |
   process.stdout.write(`  pending: ${result.pending_path}\n`);
 }
 
+function cmdAdopt(positionals: string[], values: Record<string, string | boolean | undefined>): void {
+  const target = positionals[0];
+  if (!target) fail('adopt: missing <vault-dir>. usage: hearth adopt <vault-dir> [--dry-run] [--yes]');
+  const proposal = buildProposal(target);
+  process.stdout.write(renderProposalSummary(proposal) + '\n\n');
+
+  if (values['dry-run']) {
+    process.stdout.write('--dry-run: no changes written.\n');
+    return;
+  }
+
+  if (!values.yes) {
+    process.stdout.write('Pass --yes to apply (or --dry-run to preview only). No changes made.\n');
+    return;
+  }
+
+  const result = applyProposal(proposal);
+  if (result.appendedToSchema) process.stdout.write(`✓ appended canonical block to ${result.schemaPath}\n`);
+  if (result.createdInbox) process.stdout.write(`✓ created ${result.inboxPath}\n`);
+  if (result.warnings.length > 0) {
+    process.stdout.write('\nwarnings:\n');
+    for (const w of result.warnings) process.stdout.write(`  ⚠ ${w}\n`);
+  }
+  process.stdout.write('\nNext: hearth doctor --vault ' + proposal.scan.vaultRoot + '\n');
+}
+
+function cmdDoctor(_positionals: string[], values: Record<string, string | boolean | undefined>): void {
+  const vault = resolve((values.vault as string) ?? process.cwd());
+  const report = runDoctor(vault);
+  process.stdout.write(renderDoctorReport(report) + '\n');
+  if (!report.ok) process.exit(1);
+}
+
 function help(): void {
   process.stdout.write(`hearth v0.1.0-alpha
 
@@ -298,6 +333,8 @@ usage:
   hearth query "<question>" [--vault <dir>]
   hearth lint [--vault <dir>]
   hearth channel ingest --channel <name> --message-id <id> --from <id> --text "..." [--vault <dir>] [--agent mock|claude]
+  hearth adopt <vault-dir> [--dry-run] [--yes]
+  hearth doctor [--vault <dir>]
 
 This is the v0.1 deterministic core loop. No LLM yet — mock ingest produces
 ChangePlans; kernel enforces SCHEMA.md permissions + preconditions on apply.
@@ -322,6 +359,8 @@ function main(): void {
       from: { type: 'string' },
       text: { type: 'string' },
       url: { type: 'string' },
+      'dry-run': { type: 'boolean' },
+      yes: { type: 'boolean' },
     },
     allowPositionals: true,
     strict: false,
@@ -333,6 +372,8 @@ function main(): void {
     case 'query': return cmdQuery(positionals, values);
     case 'lint': return cmdLint(positionals, values);
     case 'channel': void cmdChannel(positionals, values); return;
+    case 'adopt': return cmdAdopt(positionals, values);
+    case 'doctor': return cmdDoctor(positionals, values);
     case 'help': return help();
     default: fail(`unknown command: ${cmd}. run "hearth help"`);
   }

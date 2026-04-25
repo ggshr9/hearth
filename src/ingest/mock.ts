@@ -29,19 +29,42 @@ function slugify(name: string): string {
 }
 
 function pickTargetDir(schema: Schema): string {
-  // Prefer a dir explicitly named for hearth, otherwise the first dir where
-  // agent has at least 'add' (create) permission. raw/ is excluded — it's
-  // the source store, not where wiki pages live.
+  // Safety-ordered preference (per design discussion in v0.3.x):
+  //   1. exact "Hearth Inbox"  — the canonical adopt-created landing zone
+  //   2. any dir whose name contains "Hearth"
+  //   3. dir whose name contains "Inbox" AND agent=rw (full write, not just add)
+  //   4. dir whose name contains "Notes" AND agent=rw
+  //   5. dir whose name contains "Topics" AND agent=rw
+  //   6. fail with adopt prompt — do NOT default to "first writable"
+  //      (e.g. Maps/ may be agent=rw but is structural; not a capture target)
   const eligible = schema.rules.filter(r =>
     r.dir !== 'raw/' &&
-    permits(schema, 'agent', 'create', r.dir + 'sample.md')
+    permits(schema, 'agent', 'create', r.dir + 'sample.md'),
   );
   if (eligible.length === 0) {
-    throw new Error('mockIngest: no SCHEMA rule grants the agent create permission outside raw/. Add a `## hearth permissions` section with at least one agent=rw or agent=add directory.');
+    throw new Error(
+      'mockIngest: no SCHEMA rule grants the agent create permission outside raw/. ' +
+      'Run `hearth adopt <vault>` to add the canonical permissions block + a Hearth Inbox dir.',
+    );
   }
-  // Prefer something that looks like a hearth landing zone
-  const named = eligible.find(r => /hearth|inbox|topics|notes/i.test(r.dir));
-  return (named ?? eligible[0]!).dir;
+
+  const isRw = (d: string) => permits(schema, 'agent', 'update', d + 'sample.md');
+
+  const tier1 = eligible.find(r => /hearth\s*inbox/i.test(r.dir));
+  if (tier1) return tier1.dir;
+  const tier2 = eligible.find(r => /hearth/i.test(r.dir));
+  if (tier2) return tier2.dir;
+  const tier3 = eligible.find(r => /inbox/i.test(r.dir) && isRw(r.dir));
+  if (tier3) return tier3.dir;
+  const tier4 = eligible.find(r => /notes/i.test(r.dir) && isRw(r.dir));
+  if (tier4) return tier4.dir;
+  const tier5 = eligible.find(r => /topics/i.test(r.dir) && isRw(r.dir));
+  if (tier5) return tier5.dir;
+
+  throw new Error(
+    'mockIngest: SCHEMA grants the agent write permission but only on dirs that look structural (Maps/, etc.). ' +
+    'Hearth refuses to default-write into structural areas. Run `hearth adopt <vault>` to create a dedicated Hearth Inbox.',
+  );
 }
 
 export function mockIngest(sourcePath: string, opts: { vaultRoot: string; now?: Date } = { vaultRoot: '' }): MockIngestResult {

@@ -116,6 +116,7 @@ Channels (consumable, swappable)
 - [x] v0.1.3 AgentAdapter + Claude integration (mock + claude both selectable via --agent; malformed plans rejected before pending)
 - [ ] v0.2 pending review + diff + rebase
 - [x] v0.3.0 channel adapter spike — runtime API + channel-inbox materialize + 4 tests (no vault writes from inbound; malformed plans still rejected)
+- [x] v0.3.x adopt + doctor — bring an existing vault into hearth without migrating files (`hearth adopt <vault>`, conservative defaults, idempotent); safety-ordered target dir selection in mock-adapter
 - [ ] v0.3.1 owner-only `/hearth` command surface over WeChat
 - [ ] v0.3.2 wechat-cc end-to-end demo (capture → pending → approve → query)
 - [ ] v0.4 voice memo capture
