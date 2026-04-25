@@ -8,7 +8,8 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { basename, extname } from 'node:path';
-import { sha256, fileHash } from '../core/hash.ts';
+import { sha256 } from '../core/hash.ts';
+import { loadSchema, permits, type Schema } from '../core/schema.ts';
 import type { ChangePlan, ChangeOp } from '../core/types.ts';
 
 export interface MockIngestResult {
@@ -25,6 +26,22 @@ function changeIdFor(now: Date): string {
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/\.[^.]+$/, '').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 48);
+}
+
+function pickTargetDir(schema: Schema): string {
+  // Prefer a dir explicitly named for hearth, otherwise the first dir where
+  // agent has at least 'add' (create) permission. raw/ is excluded — it's
+  // the source store, not where wiki pages live.
+  const eligible = schema.rules.filter(r =>
+    r.dir !== 'raw/' &&
+    permits(schema, 'agent', 'create', r.dir + 'sample.md')
+  );
+  if (eligible.length === 0) {
+    throw new Error('mockIngest: no SCHEMA rule grants the agent create permission outside raw/. Add a `## hearth permissions` section with at least one agent=rw or agent=add directory.');
+  }
+  // Prefer something that looks like a hearth landing zone
+  const named = eligible.find(r => /hearth|inbox|topics|notes/i.test(r.dir));
+  return (named ?? eligible[0]!).dir;
 }
 
 export function mockIngest(sourcePath: string, opts: { vaultRoot: string; now?: Date } = { vaultRoot: '' }): MockIngestResult {
@@ -53,7 +70,9 @@ export function mockIngest(sourcePath: string, opts: { vaultRoot: string; now?: 
     body_preview: content.slice(0, 200),
   };
 
-  // Op 2: write a deterministic source-summary page in 01 Topics/
+  // Op 2: source-summary page in the schema-chosen target dir
+  const schema = loadSchema(opts.vaultRoot);
+  const targetDir = pickTargetDir(schema);
   const summaryBody = [
     '---',
     'type: source-summary',
@@ -77,7 +96,7 @@ export function mockIngest(sourcePath: string, opts: { vaultRoot: string; now?: 
     '```',
     '',
   ].join('\n');
-  const summaryPath = `01 Topics/${slug}-summary.md`;
+  const summaryPath = `${targetDir}${slug}-summary.md`;
   const op2: ChangeOp = {
     op: 'create',
     path: summaryPath,
