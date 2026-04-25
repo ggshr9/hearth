@@ -13,6 +13,8 @@ import { loadSchema, SchemaError } from '../core/schema.ts';
 import { createKernel } from '../core/vault-kernel.ts';
 import { PendingStore } from '../core/pending-store.ts';
 import { mockIngest } from '../ingest/mock.ts';
+import { query, NO_ANSWER } from '../core/query.ts';
+import { lint } from '../core/lint.ts';
 
 function fail(msg: string): never {
   process.stderr.write(`hearth: ${msg}\n`);
@@ -136,6 +138,57 @@ function cmdPending(positionals: string[], values: Record<string, string | boole
   fail(`pending: unknown subcommand "${sub}". expected: list | show | apply`);
 }
 
+function cmdQuery(positionals: string[], values: Record<string, string | boolean | undefined>): void {
+  const question = positionals[0];
+  if (!question) fail('query: missing <question>. usage: hearth query "<question>" [--vault <dir>]');
+  const vault = resolve((values.vault as string) ?? process.cwd());
+  let schema;
+  try { schema = loadSchema(vault); }
+  catch (e) {
+    if (e instanceof SchemaError) fail(e.message);
+    throw e;
+  }
+  void schema;
+  const result = query(vault, question);
+  if (result.hits.length === 0) {
+    process.stdout.write(`${NO_ANSWER}\n`);
+    process.exit(2); // distinct exit code so scripts can branch
+  }
+  process.stdout.write(`Found ${result.hits.length} grounded claim(s):\n\n`);
+  for (const h of result.hits) {
+    process.stdout.write(`• ${h.claim_text}\n`);
+    process.stdout.write(`    Source: ${h.source} (${h.anchor_summary})\n`);
+    process.stdout.write(`    Page:   ${h.page}\n`);
+    process.stdout.write(`    Confidence: ${h.confidence}  match=${h.match_score}\n\n`);
+  }
+}
+
+function cmdLint(positionals: string[], values: Record<string, string | boolean | undefined>): void {
+  void positionals;
+  const vault = resolve((values.vault as string) ?? process.cwd());
+  let schema;
+  try { schema = loadSchema(vault); }
+  catch (e) {
+    if (e instanceof SchemaError) fail(e.message);
+    throw e;
+  }
+  const report = lint(vault, schema);
+  process.stdout.write(`Scanned ${report.pages_scanned} page(s), ${report.claims_scanned} claim(s).\n`);
+  if (report.findings.length === 0) {
+    process.stdout.write(`✓ no findings\n`);
+    return;
+  }
+  for (const f of report.findings) {
+    const tag = f.severity === 'error' ? '✗' : '⚠';
+    process.stdout.write(`${tag} [${f.rule}] ${f.page}\n`);
+    process.stdout.write(`    ${f.message}\n`);
+    if (f.hint) process.stdout.write(`    hint: ${f.hint}\n`);
+  }
+  // lint is read-only; non-zero exit only on 'error' severity findings
+  const hasError = report.findings.some(f => f.severity === 'error');
+  if (hasError) process.exit(1);
+}
+
 function help(): void {
   process.stdout.write(`hearth v0.1.0-alpha
 
@@ -145,6 +198,8 @@ usage:
   hearth pending list
   hearth pending show <change_id>
   hearth pending apply <change_id> [--vault <dir>]
+  hearth query "<question>" [--vault <dir>]
+  hearth lint [--vault <dir>]
 
 This is the v0.1 deterministic core loop. No LLM yet — mock ingest produces
 ChangePlans; kernel enforces SCHEMA.md permissions + preconditions on apply.
@@ -171,6 +226,8 @@ function main(): void {
     case 'init': return cmdInit(positionals, values);
     case 'ingest': return cmdIngest(positionals, values);
     case 'pending': return cmdPending(positionals, values);
+    case 'query': return cmdQuery(positionals, values);
+    case 'lint': return cmdLint(positionals, values);
     case 'help': return help();
     default: fail(`unknown command: ${cmd}. run "hearth help"`);
   }

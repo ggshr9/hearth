@@ -2,7 +2,7 @@
 
 > Capture anywhere. Compile into your markdown vault. Ask with citations.
 
-**Status**: pre-alpha. [SPEC v0.2.1](./docs/SPEC.md) is the contract; v0.1 deterministic kernel is partially implemented — `init`, `ingest`, `pending list/show/apply` work end-to-end with mock ingest + transaction-hardened apply. No LLM, query, or lint yet.
+**Status**: pre-alpha. [SPEC v0.2.1](./docs/SPEC.md) is the contract; v0.1 deterministic kernel + claim-grounded query + read-only lint all work end-to-end with mock ingest. The next cut swaps mock ingest for the Anthropic Claude Agent SDK.
 
 🔗 [tendhearth.com](https://tendhearth.com) — landing
 
@@ -28,12 +28,12 @@ Lint     →  periodic audit → contradictions, orphans, drift, single-source c
 ## Five-minute demo (target shape; v0.1 is being built)
 
 ```bash
-hearth init ~/vault --template default
-hearth ingest examples/karpathy-llm-wiki.md
-hearth pending list                        # see what the agent proposes
-hearth pending apply <change_id>           # commit after review
-hearth query "How is LLM Wiki different from RAG?"
-hearth lint
+bun src/cli/index.ts init ~/demo-vault
+bun src/cli/index.ts ingest examples/karpathy-llm-wiki.md --vault ~/demo-vault
+bun src/cli/index.ts pending list                        # see what the agent proposes
+bun src/cli/index.ts pending apply <change_id> --vault ~/demo-vault
+bun src/cli/index.ts query "How is LLM Wiki different from RAG?" --vault ~/demo-vault
+bun src/cli/index.ts lint --vault ~/demo-vault
 ```
 
 Expected output:
@@ -108,8 +108,7 @@ Channels (consumable, swappable)
 - [x] [SECURITY](./docs/SECURITY.md) — threat model + three trust pillars
 - [x] v0.1 deterministic kernel: init / ingest / pending list/show/apply (mock ingest, no LLM)
 - [x] v0.1.1 transaction hardening: preflight-then-write (ChangePlan applies all-or-nothing)
-- [ ] v0.1 query (with claim-grounding enforcement)
-- [ ] v0.1 lint (citation-drift, single-source-stable, orphan, raw append-only)
+- [x] v0.1.2 claim verification + query (no-grounding → literal "no answer found in vault") + lint (citation-drift / single-source-stable / orphan / raw append-only)
 - [ ] v0.1 Claude Agent SDK integration (replace mock ingest)
 - [ ] v0.2 pending review + diff + rebase
 - [ ] v0.3 wechat-cc → hearth channel adapter
