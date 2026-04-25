@@ -6,13 +6,17 @@
 // Once this loop is proven, real Claude Agent SDK integration arrives.
 
 import { parseArgs } from 'node:util';
-import { existsSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, copyFileSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadSchema, SchemaError } from '../core/schema.ts';
 import { createKernel } from '../core/vault-kernel.ts';
 import { PendingStore } from '../core/pending-store.ts';
-import { mockIngest } from '../ingest/mock.ts';
+import { MockAgentAdapter } from '../ingest/mock-adapter.ts';
+import { ClaudeAgentAdapter } from '../ingest/claude-adapter.ts';
+import { sha256 } from '../core/hash.ts';
+import { validateChangePlan, PlanValidationError } from '../core/plan-validator.ts';
+import type { AgentAdapter } from '../core/agent-adapter.ts';
 import { query, NO_ANSWER } from '../core/query.ts';
 import { lint } from '../core/lint.ts';
 
@@ -53,9 +57,9 @@ function cmdInit(positionals: string[], values: Record<string, string | boolean 
   process.stdout.write(`  next: hearth ingest <file.md> --vault ${vault}\n`);
 }
 
-function cmdIngest(positionals: string[], values: Record<string, string | boolean | undefined>): void {
+async function cmdIngest(positionals: string[], values: Record<string, string | boolean | undefined>): Promise<void> {
   const source = positionals[0];
-  if (!source) fail('ingest: missing <source>. usage: hearth ingest <file.md> [--vault <dir>]');
+  if (!source) fail('ingest: missing <source>. usage: hearth ingest <file.md> [--vault <dir>] [--agent mock|claude]');
   const vault = resolve((values.vault as string) ?? process.cwd());
   let schema;
   try { schema = loadSchema(vault); }
@@ -63,16 +67,73 @@ function cmdIngest(positionals: string[], values: Record<string, string | boolea
     if (e instanceof SchemaError) fail(e.message);
     throw e;
   }
-  const { plan } = mockIngest(resolve(source), { vaultRoot: vault });
+
+  const agentName = (values.agent as string) ?? 'mock';
+  let adapter: AgentAdapter;
+  try {
+    if (agentName === 'mock') adapter = new MockAgentAdapter();
+    else if (agentName === 'claude') adapter = new ClaudeAgentAdapter();
+    else fail(`unknown --agent: ${agentName} (expected mock|claude)`);
+  } catch (e) {
+    fail((e as Error).message);
+  }
+
+  const sourcePath = resolve(source);
+  if (!existsSync(sourcePath)) fail(`source not found: ${sourcePath}`);
+  const content = readFileSync(sourcePath, 'utf8');
+  const sourceId = sha256(content);
+  const { basename } = await import('node:path');
+  const fname = basename(sourcePath);
+
+  // Read existing wiki pages for the agent's context (best-effort, capped)
+  const existingPages: string[] = [];
+  function walkPages(dir: string, prefix = ''): void {
+    let entries: string[];
+    try { entries = readdirSync(dir); } catch { return; }
+    for (const name of entries) {
+      if (name.startsWith('.') || name === 'raw' || name === 'node_modules') continue;
+      const full = join(dir, name);
+      let st;
+      try { st = (require('node:fs') as typeof import('node:fs')).statSync(full); } catch { continue; }
+      const rel = prefix ? `${prefix}/${name}` : name;
+      if (st.isDirectory()) walkPages(full, rel);
+      else if (name.endsWith('.md') && rel !== 'SCHEMA.md' && rel !== 'README.md' && rel !== 'index.md') {
+        existingPages.push(rel);
+      }
+    }
+  }
+  walkPages(vault);
+
+  process.stdout.write(`→ planning ingest with --agent ${adapter!.name}…\n`);
+  let plan;
+  try {
+    plan = await adapter!.planIngest(
+      { sourcePath, vaultRelativeRaw: `raw/${fname}`, content, sourceId },
+      { vaultRoot: vault, schema, existingPages },
+    );
+  } catch (e) {
+    fail(`agent failed to produce a ChangePlan: ${(e as Error).message}`);
+  }
+
+  // Re-validate even mock output, defense in depth
+  try {
+    plan = validateChangePlan(plan, { schema, vaultRoot: vault });
+  } catch (e) {
+    if (e instanceof PlanValidationError) {
+      process.stderr.write(`hearth: agent produced invalid plan — refused to enter pending queue\n`);
+      for (const issue of e.issues) process.stderr.write(`  - ${issue}\n`);
+      process.exit(1);
+    }
+    throw e;
+  }
+
   const store = new PendingStore();
-  const path = store.save(plan);
+  const savedPath = store.save(plan);
   process.stdout.write(`✓ created ChangePlan ${plan.change_id}\n`);
   process.stdout.write(`  ${plan.ops.length} ops · risk=${plan.risk} · review=${plan.requires_review}\n`);
-  process.stdout.write(`  ${path}\n`);
+  process.stdout.write(`  ${savedPath}\n`);
   process.stdout.write(`  no wiki files modified\n`);
   process.stdout.write(`  next: hearth pending show ${plan.change_id}  (then apply)\n`);
-  // Suppress unused-var warning while schema is intentionally validated above.
-  void schema;
 }
 
 function cmdPending(positionals: string[], values: Record<string, string | boolean | undefined>): void {
@@ -194,7 +255,7 @@ function help(): void {
 
 usage:
   hearth init <vault-dir> [--template default] [--force]
-  hearth ingest <file.md> [--vault <dir>]
+  hearth ingest <file.md> [--vault <dir>] [--agent mock|claude]
   hearth pending list
   hearth pending show <change_id>
   hearth pending apply <change_id> [--vault <dir>]
@@ -218,13 +279,14 @@ function main(): void {
       vault: { type: 'string' },
       template: { type: 'string' },
       force: { type: 'boolean' },
+      agent: { type: 'string' },
     },
     allowPositionals: true,
     strict: false,
   });
   switch (cmd) {
     case 'init': return cmdInit(positionals, values);
-    case 'ingest': return cmdIngest(positionals, values);
+    case 'ingest': void cmdIngest(positionals, values); return;
     case 'pending': return cmdPending(positionals, values);
     case 'query': return cmdQuery(positionals, values);
     case 'lint': return cmdLint(positionals, values);

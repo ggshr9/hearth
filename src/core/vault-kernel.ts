@@ -85,7 +85,7 @@ function checkOne(vaultRoot: string, schema: Schema, op: ChangeOp): Preflight {
     if (actual !== op.precondition.base_hash) {
       return {
         ok: false,
-        error: `target file changed since ChangePlan was created (expected ${op.precondition.base_hash.slice(0, 16)}…, got ${actual?.slice(0, 16)}…). Run \`hearth pending rebase ${op.path}\`.`,
+        error: `target file changed since ChangePlan was created (expected ${op.precondition.base_hash.slice(0, 16)}…, got ${actual?.slice(0, 16)}…). Run \`hearth pending rebase <change_id>\`.`,
         op,
       };
     }

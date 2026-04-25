@@ -195,6 +195,7 @@ describe('hearth v0.1 — core trust loop', () => {
       const result = kernel.apply(stalePlan);
       expect(result.ok).toBe(false);
       expect(result.ops[0]?.error).toMatch(/target file changed since ChangePlan/);
+      expect(result.ops[0]?.error).toMatch(/hearth pending rebase <change_id>/);
       // Crucially: human's edit is still there. The agent did NOT clobber it.
       expect(readFileSync(join(vault, conceptPath), 'utf8')).toContain('Human-edited content');
     });
