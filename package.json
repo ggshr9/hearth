@@ -1,7 +1,7 @@
 {
   "name": "hearth",
   "version": "0.1.0-alpha.0",
-  "description": "Tend your second brain. A personal AI runtime for your plain-markdown vault — Karpathy LLM Wiki pattern, chat-first, agent-agnostic.",
+  "description": "Tend your second brain. A personal AI runtime for your plain-markdown vault \u2014 Karpathy LLM Wiki pattern, chat-first, agent-agnostic.",
   "type": "module",
   "license": "MIT",
   "homepage": "https://tendhearth.com",
@@ -25,5 +25,11 @@
     "@types/node": "^22.0.0",
     "typescript": "^5.6.0",
     "vitest": "^4.0.0"
+  },
+  "main": "./src/runtime.ts",
+  "exports": {
+    ".": "./src/runtime.ts",
+    "./core/types": "./src/core/types.ts",
+    "./package.json": "./package.json"
   }
 }
