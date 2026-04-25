@@ -96,6 +96,49 @@ export function mockIngest(sourcePath: string, opts: { vaultRoot: string; now?: 
   // Op 2: source-summary page in the schema-chosen target dir
   const schema = loadSchema(opts.vaultRoot);
   const targetDir = pickTargetDir(schema);
+
+  // Pick the first substantive non-frontmatter line as a verifiable "claim".
+  // This is deterministic (no LLM); it is verifiable (the quote really is in
+  // the source); it lets mock-ingested pages be query-able without inventing
+  // synthesis. Real Claude adapter does this with judgment.
+  const lines = content.split('\n');
+  let inFm = false;
+  let fmFenceCount = 0;
+  let firstLineIdx = -1;
+  let firstLineText = '';
+  for (let i = 0; i < lines.length; i++) {
+    const l = (lines[i] ?? '').trim();
+    if (l === '---') {
+      fmFenceCount++;
+      inFm = fmFenceCount === 1;
+      if (fmFenceCount === 2) inFm = false;
+      continue;
+    }
+    if (inFm) continue;
+    if (!l || l.startsWith('#')) continue;
+    firstLineIdx = i + 1; // 1-based
+    firstLineText = (lines[i] ?? '').trim();
+    break;
+  }
+
+  let claimsBlock = '';
+  if (firstLineText.length > 0) {
+    const quote = firstLineText.slice(0, 200);
+    const quoteHash = sha256(quote);
+    claimsBlock = [
+      'claims:',
+      `  - text: ${JSON.stringify(quote)}`,
+      `    source: ${rawPath}`,
+      '    anchor:',
+      '      type: line',
+      `      line_start: ${firstLineIdx}`,
+      `      line_end: ${firstLineIdx}`,
+      `      quote: ${JSON.stringify(quote)}`,
+      `      quote_hash: ${JSON.stringify(quoteHash)}`,
+      '    confidence: high',
+    ].join('\n');
+  }
+
   const summaryBody = [
     '---',
     'type: source-summary',
@@ -106,6 +149,7 @@ export function mockIngest(sourcePath: string, opts: { vaultRoot: string; now?: 
     'author: agent:extract',
     'review_required: true',
     `generated_by: hearth-mock-ingest@0.1`,
+    ...(claimsBlock ? [claimsBlock] : []),
     '---',
     '',
     `# ${slug}`,
