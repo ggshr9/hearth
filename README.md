@@ -2,7 +2,7 @@
 
 > Tend your second brain. Karpathy LLM Wiki runtime — chat-first, vault-native, agent-agnostic.
 
-**Status: pre-alpha, designing in public. SPEC.md coming.**
+**Status**: pre-alpha. [SPEC.md v0.1](./docs/SPEC.md) is the contract; reference channel adapter follows.
 
 🔗 [tendhearth.com](https://tendhearth.com) — landing
 
@@ -63,7 +63,7 @@ Channels (consumable, swappable)
 ## Status
 
 - [x] Naming + initial repo
-- [ ] SPEC.md — public contract (verbs + interfaces + scope discipline)
+- [x] SPEC.md v0.1 — public contract (verbs + interfaces + scope discipline)
 - [ ] First reference channel adapter (wechat-cc → hearth)
 - [ ] Ingest pipeline v0 (markdown + URL)
 - [ ] Query v0 (with citation enforcement)
