@@ -4,23 +4,49 @@ Versions are sequenced for **trust closure first, format coverage last**. The or
 
 ---
 
-## v0.1 — local CLI core loop (text + URL)
+## v0.1 — local CLI core loop (markdown only; URL is stretch)
 
 The minimum that proves "raw → wiki → query → lint" is a real loop, not a demo.
 
 ```
-hearth init <vault>           # init / scan / write _hearth.json
-hearth ingest <md|txt|url>    # produces a ChangePlan in ~/.hearth/pending/
-hearth pending list           # see queued plans
-hearth pending apply <id>     # commit (after review)
+hearth init <vault> --template default
+hearth ingest <md>            # produces a ChangePlan in ~/.hearth/pending/
+hearth pending list
+hearth pending show <id>
+hearth pending apply <id>     # commit (after review; precondition checked)
 hearth query "<question>"     # answer w/ claim-level citations
 hearth lint                   # read-only audit
 hearth doctor                 # config + schema + perms diagnostic
 ```
 
-Ingest format support: `.md`, `.txt`, URL (generic Readability extraction). That's it.
+**Core acceptance: `.md` and `.txt` only.** URL ingest is a v0.1 stretch goal,
+not a release blocker. URL brings fetch errors, anti-bot, Readability quality,
+HTML prompt-injection, canonical URLs, caching — all worth handling, but none
+of them are what hearth's existence depends on. The thing to prove first is
+the trust loop, not the network plumbing.
 
-**Done when**: a fresh vault + a real source can be ingested, queried, and linted — with zero `agent:wiki` writes landing without explicit `pending apply`.
+**Implementation order matters.** Build the deterministic kernel first
+(schema parser, ChangePlan format, vault kernel with permission checks,
+citation index, lint), with a mock "agent" that produces deterministic
+ChangePlans from markdown. Only after that loop is green do we plug in
+the real LLM. This way the architecture is validated before LLM
+non-determinism enters.
+
+**Done when these tests pass**:
+
+1. No `SCHEMA.md` in vault → `hearth ingest` refuses with a clear error
+2. `hearth ingest <md>` creates a `ChangePlan` in `~/.hearth/pending/`,
+   writes nothing to the wiki
+3. `hearth pending apply <id>` writes only to paths the SCHEMA.md
+   permission table allows the agent to write to
+4. `update` op fails if the target file's `base_hash` no longer matches
+   (concurrency / staleness protection)
+5. `hearth query` for a topic with no grounding returns "no answer found
+   in vault" rather than a guess
+6. `hearth lint` is read-only by default; produces a report, mutates
+   nothing
+7. Source files in `raw/` are append-only — `hearth` cannot modify or
+   delete them, even with `--force`
 
 ---
 

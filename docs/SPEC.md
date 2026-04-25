@@ -1,4 +1,4 @@
-# hearth SPEC v0.2
+# hearth SPEC v0.2.1
 
 **Status**: draft, designing in public. This document is the contract; code lands after.
 
@@ -57,16 +57,42 @@ ops:
   - op: create
     path: 02 Topics/LLM Wiki.md
     reason: new source-summary
+    precondition:
+      exists: false                 # this path must not already exist
     body_preview: ...
   - op: update
     path: 02 Concepts/RAG.md
     reason: adds comparison with LLM Wiki
-    diff_summary: +18 / -3
+    precondition:
+      exists: true
+      base_hash: sha256:<file-content-at-plan-time>
+    patch:
+      type: unified_diff
+      value: |
+        ...
   - op: update
     path: 01 Maps/AI PKM.md
     reason: add backlink
+    precondition:
+      exists: true
+      base_hash: sha256:<...>
 requires_review: true
 ```
+
+The `precondition` block is non-optional. `vault_apply_change` re-checks
+every op's precondition immediately before writing. If a target file's
+hash has changed since the plan was produced (you edited it in Obsidian
+in the meantime, an earlier plan applied first, etc.), the apply rejects
+with:
+
+```
+Apply failed: target file changed since ChangePlan was created.
+Run `hearth pending rebase <change_id>`.
+```
+
+This is what makes the agent-doesn't-pollute-vault guarantee actually
+hold under concurrency — without preconditions, a stale plan would
+clobber human edits.
 
 The plan lands in `~/.hearth/pending/<change_id>.yaml`. Application happens via `vault_apply_change(change_id)` — see §3.
 
@@ -191,8 +217,35 @@ Risk classification (`low | medium | high`) drives default behaviour:
 
 For PDF: `page: <n>` (and optional `bbox`).
 For audio/video: `timestamp: HH:MM:SS`.
-For markdown/text: `anchor: Lstart-Lend`.
-For URL: `anchor:` may be a CSS selector or a quoted excerpt.
+For markdown/text: structured anchor — see Anchor stability below.
+For URL: `anchor:` may be a CSS selector + quoted excerpt + hash.
+
+#### Anchor stability
+
+Line numbers drift when a source is edited. To keep `claims:` resilient,
+hearth-managed citations use a structured anchor:
+
+```yaml
+claims:
+  - text: "<assertion as it appears in the page>"
+    source: raw/file.md
+    anchor:
+      type: line                  # | page | timestamp | css
+      line_start: 74
+      line_end: 79
+      quote: "<short exact excerpt>"
+      quote_hash: sha256:<digest of quote>
+    confidence: high
+```
+
+`quote_hash` is the source of truth: `Lint` recomputes it from the source
+and reports drift if it no longer matches. `line_start` / `line_end` are
+fast hints — used first, then validated against `quote_hash`.
+
+For this to work in practice, hearth-managed markdown follows a writing
+convention: **one sentence per line, one bullet per line, one claim per
+line for agent-written content.** The convention is enforced for agent
+writes; human writes are best-effort (`Lint` warns, doesn't fail).
 
 ### 5.3 Source as data, never instruction
 
