@@ -48,14 +48,44 @@ export class SchemaError extends Error {
 const VALID: Permission[] = ['none', 'r', 'add', 'rw'];
 
 function normalizePerm(token: string): Permission {
-  const t = token.trim().toLowerCase();
-  if ((VALID as string[]).includes(t)) return t as Permission;
-  throw new SchemaError(`invalid permission token: "${token}" (expected one of ${VALID.join('|')})`);
+  // Strip markdown emphasis, parenthetical commentary, whitespace.
+  const stripped = token
+    .replace(/\([^)]*\)/g, '')              // ASCII parens
+    .replace(/（[^）]*）/g, '')                 // CJK parens
+    .replace(/\*+/g, '')                      // markdown bold/italic markers
+    .trim()
+    .toLowerCase();
+
+  if ((VALID as string[]).includes(stripped)) return stripped as Permission;
+
+  // Chinese tokens (and English aliases): order matters — match compounds first
+  if (/读写|read[\s-]*write|rw/i.test(stripped)) return 'rw';
+  if (/(读|read).*(添加|add)|(添加|add).*(读|read)/i.test(stripped)) return 'add';
+  if (/^只读$|read[\s-]*only|^r$/i.test(stripped)) return 'r';
+  if (/^添加$|^add$/i.test(stripped)) return 'add';
+  if (/^读$|^r$|read/i.test(stripped)) return 'r';
+  if (/^无$|none|no\s*access/i.test(stripped)) return 'none';
+
+  throw new SchemaError(`invalid permission token: "${token}" (expected ${VALID.join('|')} or Chinese 无/只读/读/添加/读+添加/读写)`);
 }
 
+const HEADER_DIR_KEYS = new Set(['dir', '区域', 'directory', 'path', '路径']);
+const HEADER_HUMAN_KEYS = new Set(['human', '人', 'user']);
+const HEADER_AGENT_KEYS = new Set(['agent', 'ai', 'llm', 'bot']);
+
+function isDirHeader(s: string): boolean { return HEADER_DIR_KEYS.has(s); }
+function isHumanHeader(s: string): boolean { return HEADER_HUMAN_KEYS.has(s); }
+function isAgentHeader(s: string): boolean { return HEADER_AGENT_KEYS.has(s); }
+
 function parseTable(raw: string): SchemaRule[] {
-  // Find the first markdown table whose header contains dir/human/agent
-  const lines = raw.split(/\r?\n/);
+  // Prefer the canonical `## hearth permissions` section if present —
+  // user's broader SCHEMA.md may have a more elaborate human-readable
+  // table (Chinese descriptions, range rows, etc.) that we don't try to
+  // interpret. The canonical section is the machine-readable contract.
+  const canonicalMatch = raw.match(/##\s+hearth\s+permissions[\s\S]*?(?=\n##\s|$)/i);
+  const scope = canonicalMatch ? canonicalMatch[0] : raw;
+
+  const lines = scope.split(/\r?\n/);
   let inTable = false;
   let headerCols: string[] = [];
   const rules: SchemaRule[] = [];
@@ -67,26 +97,37 @@ function parseTable(raw: string): SchemaRule[] {
     }
     const cells = line.split('|').map(c => c.trim()).filter((c, idx, arr) => !(c === '' && (idx === 0 || idx === arr.length - 1)));
     if (!inTable) {
-      const lower = cells.map(c => c.toLowerCase());
-      if (lower.includes('dir') && lower.includes('human') && lower.includes('agent')) {
+      const lower = cells.map(c => c.toLowerCase().replace(/[`*]/g, '').trim());
+      if (lower.some(isDirHeader) && lower.some(isHumanHeader) && lower.some(isAgentHeader)) {
         headerCols = lower;
         inTable = true;
-        // Skip the separator line if present
         const next = lines[i + 1] ?? '';
         if (/^[\s|:-]+$/.test(next)) i++;
       }
       continue;
     }
-    const dirIdx = headerCols.indexOf('dir');
-    const humanIdx = headerCols.indexOf('human');
-    const agentIdx = headerCols.indexOf('agent');
-    if (cells.length < headerCols.length) continue;
-    const dir = cells[dirIdx] ?? '';
+    const dirIdx = headerCols.findIndex(isDirHeader);
+    const humanIdx = headerCols.findIndex(isHumanHeader);
+    const agentIdx = headerCols.findIndex(isAgentHeader);
+    if (cells.length < Math.max(dirIdx, humanIdx, agentIdx) + 1) continue;
+    let dir = cells[dirIdx] ?? '';
+    // Clean common decorations: backticks, leading/trailing whitespace
+    dir = dir.replace(/[`]/g, '').trim();
     if (!dir || dir.startsWith('-')) continue;
+    let human: Permission, agent: Permission;
+    try {
+      human = normalizePerm(cells[humanIdx] ?? 'none');
+      agent = normalizePerm(cells[agentIdx] ?? 'none');
+    } catch {
+      // Skip rows we can't parse rather than failing the whole load —
+      // user's SCHEMA may contain commentary rows the parser doesn't
+      // need to understand.
+      continue;
+    }
     rules.push({
       dir: dir.endsWith('/') ? dir : dir + '/',
-      human: normalizePerm(cells[humanIdx] ?? 'none'),
-      agent: normalizePerm(cells[agentIdx] ?? 'none'),
+      human,
+      agent,
     });
   }
   return rules;
