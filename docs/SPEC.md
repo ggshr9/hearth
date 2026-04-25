@@ -271,12 +271,23 @@ Tool descriptions provided by external MCP servers are likewise treated as untru
 
 ## 7. v0.1 ingest scope
 
-To prove the trust closure before chasing format coverage, **v0.1 supports only**:
+To prove the trust closure before chasing format coverage:
 
-- `.md` and `.txt` (direct, frontmatter normalized)
-- URL (fetch + Mozilla Readability + a small set of site adapters; first cut: generic only)
+**v0.1 release blocker** (must work, must have tests):
+- `.md` (direct, frontmatter normalized)
+- `.txt`
 
-Multi-format extractors (PDF / Word / Excel / PPT / video / audio / image / B站 / YouTube / 公众号) move to `v0.5`. See `docs/ROADMAP.md`.
+**Stretch (nice-to-have for v0.1, not a release blocker)**:
+- URL (fetch + Mozilla Readability)
+
+**Deferred to v0.5**:
+- PDF, Word (.docx), Excel (.xlsx, .csv), PowerPoint (.pptx), video, audio, image
+- Site adapters: B站, YouTube, 微信公众号
+
+URL is held back from blocker status because it drags in fetch errors,
+anti-bot, Readability quality, HTML prompt-injection, canonical URLs, and
+caching — all worth handling, but none of them are what hearth's existence
+depends on. The thing to prove first is the trust loop. See `docs/ROADMAP.md`.
 
 ---
 
@@ -292,7 +303,7 @@ Multi-format extractors (PDF / Word / Excel / PPT / video / audio / image / B站
 
 ## 9. Versioning
 
-This is `v0.2`. The next iterations are sequenced for trust-closure first, format coverage last. See `docs/ROADMAP.md`.
+This is `v0.2.1`. The next iterations are sequenced for trust-closure first, format coverage last. See `docs/ROADMAP.md`.
 
 ---
 
