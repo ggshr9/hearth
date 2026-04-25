@@ -4,6 +4,8 @@
 
 **Status: pre-alpha, designing in public. SPEC.md coming.**
 
+🔗 [tendhearth.com](https://tendhearth.com) — landing
+
 `hearth` is a personal AI runtime that sits between your channels (chat, voice) and your plain-markdown vault. It implements [Andrej Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f): you drop sources into `raw/`, the agent compiles them into a structured wiki, you query and live in the result.
 
 ## What hearth does

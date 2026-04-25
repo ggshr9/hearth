@@ -9,148 +9,290 @@
 <meta property="og:description" content="A personal AI runtime for your plain-markdown vault. Karpathy LLM Wiki pattern, chat-first, agent-agnostic.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://tendhearth.com">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%23e07a3a' d='M16 3c-1 4-5 5-5 11 0 5 4 9 5 9s5-4 5-9c0-3-1-5-2-7 0 2-1 3-2 3 1-3 0-5-1-7z'/%3E%3C/svg%3E">
+<meta name="theme-color" content="#fdfaf6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#15130f" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%23c66127' d='M16 3c-1 4-5 5-5 11 0 5 4 9 5 9s5-4 5-9c0-3-1-5-2-7 0 2-1 3-2 3 1-3 0-5-1-7z'/%3E%3C/svg%3E">
 <style>
   :root {
-    --bg: #fdfaf6;
-    --fg: #1f1d1a;
-    --fg-soft: #4a463f;
-    --muted: #948d80;
-    --border: #e8e2d6;
-    --accent: #e07a3a;
-    --code-bg: #f5f0e6;
+    --bg: #fbf7ef;
+    --bg-elev: #f5efe2;
+    --fg: #1a1814;
+    --fg-soft: #3e3a32;
+    --muted: #8a8175;
+    --border: #e5dfd0;
+    --accent: #c66127;
+    --accent-soft: #d18856;
+    --rule: #d8d1be;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #15130f;
-      --fg: #f0eada;
-      --fg-soft: #c9c2b0;
-      --muted: #8e8675;
-      --border: #2a2620;
-      --accent: #f49664;
-      --code-bg: #1f1c17;
+      --bg: #14120e;
+      --bg-elev: #1c1914;
+      --fg: #f3eddb;
+      --fg-soft: #d2cab5;
+      --muted: #897f6c;
+      --border: #2c281f;
+      --accent: #e58148;
+      --accent-soft: #b35e2a;
+      --rule: #322d23;
     }
   }
   * { box-sizing: border-box; }
-  html, body { background: var(--bg); color: var(--fg); margin: 0; padding: 0; }
+  ::selection { background: var(--accent); color: var(--bg); }
+
+  html { background: var(--bg); }
   body {
-    font-family: ui-serif, "Iowan Old Style", "Charter", Georgia, "Songti SC", serif;
-    line-height: 1.7;
+    background: var(--bg);
+    color: var(--fg);
+    margin: 0; padding: 0;
+    font-family: "Charter", "Iowan Old Style", "Source Serif Pro", Cambria, "Songti SC", Georgia, serif;
     font-size: 18px;
+    line-height: 1.72;
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "kern", "liga", "calt";
   }
-  main { max-width: 640px; margin: 0 auto; padding: 4em 1.4em 5em; }
+  .sans { font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", system-ui, sans-serif; }
 
-  .brand { display: flex; align-items: baseline; gap: 12px; margin-bottom: 0.4em; }
-  .brand .icon { width: 28px; height: 28px; flex-shrink: 0; align-self: center; }
-  .brand h1 { font-size: 2.2em; margin: 0; font-weight: 600; letter-spacing: -0.01em; font-family: ui-sans-serif, -apple-system, "PingFang SC", system-ui, sans-serif; }
-  .tagline { color: var(--fg-soft); font-style: italic; font-size: 1.15em; margin-top: 0; margin-bottom: 2.5em; }
+  main { max-width: 600px; margin: 0 auto; padding: 6em 1.5em 6em; }
 
-  h2 {
+  /* ── Masthead ────────────────────────────────────────── */
+  header.masthead { text-align: center; margin-bottom: 4.2em; }
+  header.masthead .glyph { display: inline-block; margin-bottom: 0.5em; }
+  header.masthead .glyph svg { display: block; width: 36px; height: 36px; }
+  header.masthead h1 {
     font-family: ui-sans-serif, -apple-system, "PingFang SC", system-ui, sans-serif;
-    font-size: 0.78em;
-    text-transform: uppercase;
-    letter-spacing: 0.14em;
-    color: var(--muted);
-    font-weight: 600;
-    margin-top: 3em;
-    margin-bottom: 0.6em;
+    font-size: 2.6em;
+    font-weight: 500;
+    letter-spacing: -0.025em;
+    margin: 0 0 0.2em;
+    color: var(--fg);
   }
-  p { margin: 0.8em 0; }
-  p.lede { font-size: 1.06em; }
-
-  ul.verbs { list-style: none; padding: 0; margin: 1em 0; }
-  ul.verbs li { padding: 0.6em 0; border-top: 1px solid var(--border); }
-  ul.verbs li:last-child { border-bottom: 1px solid var(--border); }
-  ul.verbs strong {
-    display: inline-block; width: 90px;
-    font-family: ui-sans-serif, system-ui, sans-serif;
-    font-weight: 600; font-style: normal;
-    color: var(--accent);
-    font-size: 0.92em;
-    letter-spacing: 0.02em;
-  }
-  ul.verbs span { color: var(--fg-soft); }
-
-  .quote {
-    border-left: 2px solid var(--accent);
-    padding-left: 1.1em;
+  header.masthead .tagline {
     color: var(--fg-soft);
-    margin: 1.2em 0;
+    font-style: italic;
+    font-size: 1.18em;
+    margin: 0;
+    letter-spacing: 0.005em;
   }
-  .quote cite { display: block; margin-top: 0.4em; color: var(--muted); font-size: 0.86em; font-style: normal; }
+  header.masthead .rule { width: 32px; height: 1px; background: var(--accent); margin: 1.6em auto 0; }
 
-  code { background: var(--code-bg); padding: 1px 6px; border-radius: 3px; font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace; font-size: 0.88em; }
+  /* ── Body prose ──────────────────────────────────────── */
+  p { margin: 1em 0; }
+  p.lede { font-size: 1.08em; color: var(--fg); margin-top: 0; }
+  p.lede::first-letter {
+    font-family: "Charter", Georgia, serif;
+    font-size: 3.4em;
+    line-height: 0.86;
+    float: left;
+    margin: 0.08em 0.12em -0.08em 0;
+    color: var(--accent);
+    font-weight: 600;
+  }
 
-  .cta { display: inline-flex; align-items: center; gap: 6px; margin-top: 1.6em; padding: 12px 22px; background: var(--accent); color: white; text-decoration: none; border-radius: 6px; font-family: ui-sans-serif, system-ui, sans-serif; font-weight: 600; font-size: 0.95em; transition: transform .15s, opacity .15s; }
-  .cta:hover { transform: translateY(-1px); opacity: 0.93; }
+  /* ── Section headings (marginalia style) ─────────────── */
+  section { margin-top: 3.6em; position: relative; }
+  section > h2 {
+    font-family: ui-sans-serif, -apple-system, "PingFang SC", system-ui, sans-serif;
+    font-size: 0.74em;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--accent);
+    font-weight: 600;
+    margin: 0 0 0.7em;
+  }
+
+  /* ── Pull quote ──────────────────────────────────────── */
+  blockquote {
+    margin: 2em 0;
+    padding: 0 0 0 1.4em;
+    border-left: 2px solid var(--accent);
+    color: var(--fg-soft);
+    font-style: italic;
+    font-size: 1.04em;
+  }
+  blockquote cite { display: block; margin-top: 0.6em; font-size: 0.84em; color: var(--muted); font-style: normal; letter-spacing: 0.01em; }
+  blockquote cite a { color: inherit; }
+
+  /* ── Verbs list ──────────────────────────────────────── */
+  dl.verbs { margin: 1.2em 0; }
+  dl.verbs dt {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-weight: 600;
+    color: var(--accent);
+    margin-top: 1.4em;
+    font-size: 0.96em;
+    letter-spacing: 0.01em;
+  }
+  dl.verbs dt:first-child { margin-top: 0; }
+  dl.verbs dd { margin: 0.2em 0 0; color: var(--fg-soft); }
+
+  /* ── Vault example block ─────────────────────────────── */
+  .vault-sample {
+    margin: 1.6em 0;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.1em 1.3em;
+    font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
+    font-size: 0.84em;
+    line-height: 1.55;
+    color: var(--fg-soft);
+    overflow-x: auto;
+  }
+  .vault-sample .dim { color: var(--muted); }
+  .vault-sample .key { color: var(--accent); }
+
+  /* ── Inline code & links ─────────────────────────────── */
+  code { background: var(--bg-elev); padding: 1px 6px; border-radius: 3px; font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace; font-size: 0.86em; color: var(--fg); }
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color .12s; }
+  a:hover { border-bottom-color: var(--accent); }
+  p a, dd a, blockquote a, footer a { border-bottom: 1px dotted var(--rule); }
+  p a:hover, dd a:hover, blockquote a:hover, footer a:hover { border-bottom-color: var(--accent); }
+
+  /* ── CTA ─────────────────────────────────────────────── */
+  .cta-row { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 2em; }
+  .cta {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 11px 22px;
+    border-radius: 4px;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.92em;
+    font-weight: 500;
+    letter-spacing: 0.005em;
+    text-decoration: none;
+    border: 1px solid transparent;
+    transition: transform .15s, opacity .15s, border-color .15s, color .15s;
+  }
+  .cta.primary { background: var(--accent); color: var(--bg); }
+  .cta.primary:hover { transform: translateY(-1px); opacity: 0.94; border-bottom: 1px solid transparent; }
+  .cta.ghost { color: var(--fg-soft); border-color: var(--border); }
+  .cta.ghost:hover { color: var(--fg); border-color: var(--muted); transform: translateY(-1px); border-bottom-color: var(--muted); }
   .cta svg { display: block; }
-  .cta-row { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
-  .cta-row .ghost { background: transparent; color: var(--fg-soft); border: 1px solid var(--border); }
-  .cta-row .ghost:hover { color: var(--fg); border-color: var(--muted); transform: translateY(-1px); }
 
-  footer { margin-top: 5em; padding-top: 2em; border-top: 1px solid var(--border); font-size: 0.85em; color: var(--muted); display: flex; gap: 1.2em; flex-wrap: wrap; }
-  footer a { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--border); }
+  /* ── Footer ──────────────────────────────────────────── */
+  footer {
+    margin-top: 6em;
+    padding-top: 2.2em;
+    border-top: 1px solid var(--rule);
+    color: var(--muted);
+    font-size: 0.82em;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.8em 1.4em;
+    letter-spacing: 0.01em;
+  }
+  footer .links { display: flex; gap: 1.2em; flex-wrap: wrap; }
+  footer a { color: inherit; border-bottom: 1px dotted var(--rule); }
   footer a:hover { color: var(--fg); border-color: var(--accent); }
+  footer .ember { font-size: 0.85em; }
 
+  /* ── Closing ornament ────────────────────────────────── */
+  .ornament { text-align: center; margin: 4em 0 1em; color: var(--accent); opacity: 0.6; letter-spacing: 0.6em; font-size: 0.9em; }
+
+  /* ── Mobile ──────────────────────────────────────────── */
   @media (max-width: 600px) {
     body { font-size: 17px; }
-    main { padding: 2.5em 1.2em 3em; }
-    .brand h1 { font-size: 1.8em; }
+    main { padding: 3em 1.3em 3em; }
+    header.masthead { margin-bottom: 3em; }
+    header.masthead h1 { font-size: 2.2em; }
+    p.lede::first-letter { font-size: 3em; }
+    section { margin-top: 2.8em; }
   }
+
+  /* ── Subtle entrance ─────────────────────────────────── */
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  main > * { animation: fadeUp .6s ease-out both; }
+  main > *:nth-child(2) { animation-delay: 0.06s; }
+  main > *:nth-child(3) { animation-delay: 0.12s; }
+  main > *:nth-child(4) { animation-delay: 0.18s; }
+  main > *:nth-child(5) { animation-delay: 0.24s; }
+  main > *:nth-child(6) { animation-delay: 0.30s; }
+  main > *:nth-child(n+7) { animation-delay: 0.34s; }
+  @media (prefers-reduced-motion: reduce) { main > * { animation: none; } }
 </style>
 </head>
 <body>
 <main>
-  <div class="brand">
-    <svg class="icon" viewBox="0 0 32 32" aria-hidden="true">
-      <path fill="var(--accent)" d="M16 3c-1 4-5 5-5 11 0 5 4 9 5 9s5-4 5-9c0-3-1-5-2-7 0 2-1 3-2 3 1-3 0-5-1-7z"/>
-      <ellipse fill="var(--accent)" opacity="0.4" cx="16" cy="28" rx="9" ry="1.5"/>
-    </svg>
+  <header class="masthead">
+    <span class="glyph">
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <path fill="var(--accent)" d="M16 3c-1 4-5 5-5 11 0 5 4 9 5 9s5-4 5-9c0-3-1-5-2-7 0 2-1 3-2 3 1-3 0-5-1-7z"/>
+        <path fill="var(--accent-soft)" d="M16 12c-0.5 2-2.5 2.5-2.5 5.5 0 2.5 2 4.5 2.5 4.5s2.5-2 2.5-4.5c0-1.5-0.5-2.5-1-3.5 0 1-0.5 1.5-1 1.5 0.5-1.5 0-2.5-0.5-3.5z"/>
+        <ellipse fill="var(--accent)" opacity="0.25" cx="16" cy="28" rx="11" ry="1.2"/>
+      </svg>
+    </span>
     <h1>hearth</h1>
-  </div>
-  <p class="tagline">tend your second brain.</p>
+    <p class="tagline">tend your second brain.</p>
+    <div class="rule"></div>
+  </header>
 
-  <p class="lede">A personal AI runtime for your plain-markdown vault. Capture from chat or voice, let an agent compile your sources into a structured wiki, query it conversationally — with citations.</p>
+  <p class="lede">A personal AI runtime for your plain-markdown vault. Capture from chat or voice, let an agent compile sources into a structured wiki, query it conversationally — with citations.</p>
 
-  <div class="quote">
-    "Obsidian is the IDE; the LLM is the programmer; the wiki is the codebase."
-    <cite>— Andrej Karpathy, <a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f" style="color: inherit;">LLM Wiki gist</a></cite>
-  </div>
+  <blockquote>
+    "Obsidian is the IDE; the LLM is the programmer; the wiki is the codebase. The tedious part of maintaining a knowledge base is not the reading or the thinking — it's the bookkeeping. LLMs don't abandon wikis because the maintenance cost approaches zero for them."
+    <cite>— Andrej Karpathy, <a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">LLM Wiki</a></cite>
+  </blockquote>
 
-  <h2>three verbs</h2>
-  <ul class="verbs">
-    <li><strong>Ingest</strong><span>drop a source into <code>raw/</code> — agent summarizes, extracts concepts, links them, updates the topic MOC.</span></li>
-    <li><strong>Query</strong><span>ask in chat or voice — agent answers from the wiki, with citations. Insights worth keeping get written back as new pages.</span></li>
-    <li><strong>Lint</strong><span>periodic audit — contradictions surfaced, orphan pages adopted, single-source claims flagged. The wiki stays clean.</span></li>
-  </ul>
+  <section>
+    <h2>three verbs</h2>
+    <dl class="verbs">
+      <dt>Ingest</dt>
+      <dd>A new source arrives in <code>raw/</code>. The agent reads it, summarizes, extracts concepts, links them, updates the topic Map.</dd>
+      <dt>Query</dt>
+      <dd>You ask in chat or voice. The agent answers from the wiki, with citations. Insights worth keeping get written back as new pages — so they don't get lost in the conversation stream.</dd>
+      <dt>Lint</dt>
+      <dd>Periodic audit. Contradictions surfaced. Orphan pages adopted. Single-source claims flagged. The wiki stays clean — because the maintenance cost approaches zero.</dd>
+    </dl>
+  </section>
 
-  <h2>what hearth is</h2>
-  <p>A runtime, not a UI. Obsidian (or Logseq, Foam, plain text) stays your editor. hearth is the agent that lives between your channels and your vault.</p>
-  <p>Channel-agnostic — WeChat first, telegram &amp; voice next. Agent-agnostic — Claude Code, Codex, any ACP runtime. Editor-agnostic — your vault is plain markdown, no lock-in.</p>
+  <section>
+    <h2>your vault, your contract</h2>
+    <p>hearth doesn't impose structure. You write a <code>SCHEMA.md</code> defining what kinds of pages live where, and the agent follows it. Append-only sources, agent-maintained wiki, human-governed schema — three layers, one folder.</p>
+    <pre class="vault-sample"><span class="dim">vault/</span>
+<span class="dim">├── </span><span class="key">raw/</span><span class="dim">                  ← primary sources, append-only</span>
+<span class="dim">├── </span><span class="key">01 Maps/</span><span class="dim">             ← MOCs, agent-maintained</span>
+<span class="dim">├── </span><span class="key">02 &lt;topic&gt;/</span><span class="dim">           ← agent-maintained wiki</span>
+<span class="dim">├── </span><span class="key">99 Assets/</span><span class="dim">           ← attachments</span>
+<span class="dim">└── </span><span class="key">SCHEMA.md</span><span class="dim">            ← human-governed contract</span></pre>
+  </section>
 
-  <h2>what hearth is not</h2>
-  <p>Not another note-taking app. Not a chatbot framework. Not a database. Not a vendor-managed service. Just files on your disk plus an agent that respects your <code>SCHEMA.md</code>.</p>
+  <section>
+    <h2>what hearth is</h2>
+    <p>A runtime, not a UI. Obsidian — or Logseq, Foam, plain text — stays your editor. hearth is the agent that lives between your channels and your vault, always-on but never in the way.</p>
+    <p>Channel-agnostic — WeChat first, Telegram and voice next. Agent-agnostic — Claude Code, Codex, any ACP-compatible runtime. Editor-agnostic — your vault is plain markdown, no lock-in.</p>
+  </section>
 
-  <h2>who it's for</h2>
-  <p>You already have (or want to start) a plain-markdown vault. You want an LLM agent maintaining it for you, not just retrieving from it. You want to capture from wherever you are — phone, voice, link sharing — without sitting at your desk.</p>
+  <section>
+    <h2>what hearth is not</h2>
+    <p>Not another note-taking app. Not a chatbot framework. Not a vendor-managed service. Not a database. Just files on your disk, plus an agent that respects your <code>SCHEMA.md</code> and refuses to slop.</p>
+  </section>
 
-  <h2>status</h2>
-  <p>Pre-alpha. Spec landing first; reference channel adapter (WeChat) follows; multi-format ingest pipeline (PDF / Word / video / web) after. Building in public.</p>
+  <section>
+    <h2>who it's for</h2>
+    <p>You already have, or want to start, a plain-markdown vault. You want an LLM agent maintaining it for you, not just retrieving from it. You want to capture from wherever you are — phone, voice memo, link sharing — without sitting at your desk.</p>
+  </section>
 
-  <div class="cta-row">
-    <a class="cta" href="https://github.com/ggshr9/hearth">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.52-1.32-1.27-1.67-1.27-1.67-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.76 2.69 1.25 3.34.95.1-.74.4-1.25.72-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.46.11-3.04 0 0 .96-.31 3.16 1.18a10.95 10.95 0 0 1 5.74 0c2.2-1.49 3.16-1.18 3.16-1.18.62 1.58.23 2.75.11 3.04.74.81 1.18 1.84 1.18 3.1 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.13v3.16c0 .31.21.67.8.56C20.21 21.39 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5z"/></svg>
-      GitHub
-    </a>
-    <a class="cta ghost" href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">read the gist</a>
-  </div>
+  <section>
+    <h2>status</h2>
+    <p>Pre-alpha. Spec landing first; reference channel adapter (WeChat) follows; multi-format ingest pipeline — PDF, Word, Excel, video, web — comes after. Building in public.</p>
+    <div class="cta-row">
+      <a class="cta primary" href="https://github.com/ggshr9/hearth">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.52-1.32-1.27-1.67-1.27-1.67-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.76 2.69 1.25 3.34.95.1-.74.4-1.25.72-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.46.11-3.04 0 0 .96-.31 3.16 1.18a10.95 10.95 0 0 1 5.74 0c2.2-1.49 3.16-1.18 3.16-1.18.62 1.58.23 2.75.11 3.04.74.81 1.18 1.84 1.18 3.1 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.13v3.16c0 .31.21.67.8.56C20.21 21.39 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5z"/></svg>
+        Star on GitHub
+      </a>
+      <a class="cta ghost" href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">read the gist</a>
+    </div>
+  </section>
+
+  <div class="ornament">· · ·</div>
 
   <footer>
-    <span>MIT licensed</span>
-    <a href="https://github.com/ggshr9/hearth">github</a>
-    <a href="https://github.com/ggshr9/hearth/blob/main/docs/why.md">why</a>
-    <a href="https://github.com/ggshr9/hearth/blob/main/docs/SPEC.draft.md">spec (draft)</a>
+    <span class="ember">MIT licensed · built in public</span>
+    <div class="links">
+      <a href="https://github.com/ggshr9/hearth">github</a>
+      <a href="https://github.com/ggshr9/hearth/blob/main/docs/why.md">why</a>
+      <a href="https://github.com/ggshr9/hearth/blob/main/docs/SPEC.draft.md">spec</a>
+    </div>
   </footer>
 </main>
 </body>
