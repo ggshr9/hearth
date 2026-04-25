@@ -1,4 +1,4 @@
-# hearth SPEC v0.1
+# hearth SPEC v0.2
 
 **Status**: draft, designing in public. This document is the contract; code lands after.
 
@@ -8,7 +8,15 @@
 
 `hearth` is a personal AI runtime that sits between input channels (chat, voice, file drop, web clipping) and a plain-markdown vault. It implements [Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — sources go in, an agent compiles them into a structured wiki, queries return citation-grounded answers, periodic lint keeps the wiki clean.
 
-It is a **runtime**, not a UI. Editors (Obsidian, Logseq, Foam, plain text) stay yours. Channels (WeChat, Telegram, voice, CLI) are interchangeable. Agent runtimes (Claude Code, Codex, ACP-compatible) are pluggable. The vault is the canonical store; everything else is consumable.
+`hearth` is a **runtime**, not a UI. Editors (Obsidian, Logseq, Foam, plain text) stay yours. Channels (WeChat, Telegram, voice, CLI) are interchangeable. The vault is canonical; everything else is consumable.
+
+What sets `hearth` apart from "AI auto-organize my notes" tools:
+
+- **Transaction-controlled writes.** The agent never writes the vault directly. It produces a `ChangePlan`; a separate vault kernel applies it after permission and policy checks.
+- **Claim-level citations.** Every answer and every agent-written page anchors specific claims to specific source locations (file + line / page / timestamp), not just file-level "see also".
+- **Source-as-data.** Material ingested into the vault is treated as data, never as instruction. Web pages, PDFs, chat transcripts cannot inject behaviour into the agent.
+
+These three properties are what make the difference between a useful runtime and a slop generator.
 
 ---
 
@@ -17,11 +25,13 @@ It is a **runtime**, not a UI. Editors (Obsidian, Logseq, Foam, plain text) stay
 A vault is a directory of plain-markdown files plus a human-authored `SCHEMA.md`. `SCHEMA.md` defines:
 
 - Folder structure (e.g. `raw/`, `<topic>/`, `Maps/`, `Assets/`)
-- A **permission table**: who may add/modify/delete in each directory (human, agent, or both)
-- The **frontmatter taxonomy**: required types (e.g. `concept`, `source-summary`, `moc`, `walkthrough`, `decision`), required status values, source quality tiers
+- A **permission table**: who may add / modify / delete in each directory (human, agent, or both)
+- The **frontmatter taxonomy**: required types (e.g. `concept`, `source-summary`, `moc`, `walkthrough`, `decision`), required `status` values, source quality tiers
 - Writing conventions
 
-`hearth` reads `SCHEMA.md` on startup. Every action it takes is constrained by it. **No SCHEMA.md, no compile.** This is the single most important rule and the primary defense against slop.
+`hearth` reads `SCHEMA.md` on startup. Every action it takes is constrained by it. **No SCHEMA.md, no compile.** This rule is the single most important defense against slop.
+
+A `--template default` schema is shipped for first-time users; templates for additional workflows are deferred until there is real user demand.
 
 ---
 
@@ -29,43 +39,58 @@ A vault is a directory of plain-markdown files plus a human-authored `SCHEMA.md`
 
 These are the only verbs `hearth` exposes. Everything else is plumbing.
 
-### `Ingest(source) → IngestResult`
+### `Ingest(source) → ChangePlan`
 
-A new file lands in `raw/` (or arrives via a channel). `Ingest`:
+A new file lands in `raw/`, or arrives via a channel. `Ingest`:
 
 1. Detects format, routes to the appropriate extractor
-2. Preserves the original under `raw/` or `Assets/` per SCHEMA.md
-3. Writes a `source-summary` page to the appropriate topic directory
-4. Extracts concepts → creates or updates `concept` pages
-5. If the source describes a process → writes a `walkthrough`
-6. Updates the relevant Map of Content
-7. Establishes bidirectional links between new and existing pages
+2. Preserves the original under `raw/` or `Assets/` per SCHEMA.md (the only direct write `Ingest` performs — and only to append-only zones)
+3. Produces a **`ChangePlan`** describing every proposed write to the wiki. **It does not modify the wiki.**
 
-A typical Ingest touches 5–15 wiki pages. `IngestResult` lists every file created, updated, or skipped, plus any concepts it couldn't resolve.
+A `ChangePlan` is a YAML document:
+
+```yaml
+change_id: 2026-04-25-001
+source_id: sha256:<digest>
+risk: low | medium | high
+ops:
+  - op: create
+    path: 02 Topics/LLM Wiki.md
+    reason: new source-summary
+    body_preview: ...
+  - op: update
+    path: 02 Concepts/RAG.md
+    reason: adds comparison with LLM Wiki
+    diff_summary: +18 / -3
+  - op: update
+    path: 01 Maps/AI PKM.md
+    reason: add backlink
+requires_review: true
+```
+
+The plan lands in `~/.hearth/pending/<change_id>.yaml`. Application happens via `vault_apply_change(change_id)` — see §3.
 
 ### `Query(question, context?) → Answer`
 
 `Query`:
 
-1. Searches the wiki (ripgrep + frontmatter index, optional embedding fallback later)
+1. Searches the wiki (ripgrep + frontmatter index; embedding fallback deferred to v0.2+)
 2. Assembles an answer grounded in retrieved pages
-3. **Mandates citations.** Every claim points to a source path; pages without sufficient grounding are reported as "no answer found in vault"
-4. If the answer surfaces a novel synthesis, optionally writes it back as a new wiki page (gated, see §5)
-
-The "write back" rule prevents the failure mode where good thinking gets trapped in a chat transcript and lost.
+3. **Mandates claim-level citations.** Every claim points to a specific anchor (`file:Lstart-Lend`, `page:N`, `timestamp:HH:MM:SS`); pages without sufficient grounding are reported as "no answer found in vault" rather than guessed
+4. **Default read-only.** If a synthesis is novel and the user explicitly says "save this" / "记到 vault" / "形成一页", it produces a `ChangePlan` (see Ingest) for review — never auto-commits
 
 ### `Lint(scope?) → LintReport`
 
-`Lint` is a pure auditor. Defaults to read-only — proposes, does not commit. Checks include:
+`Lint` is a pure auditor. It is read-only by default — proposes, never commits. Checks:
 
 - Contradictions between pages
 - Orphan pages not linked from any MOC
 - `status: stable` pages whose source has been updated
-- `status: stable` pages supported by a single secondary source
+- `status: stable` pages supported by a single secondary source (per SCHEMA.md source quality tiers)
 - Missing cross-references between conceptually-linked pages
 - Sources in `raw/` never ingested
 
-Auto-fix is opt-in per check, never default.
+Each lint finding can be turned into a `ChangePlan` if the user opts in. Auto-fix is per-check opt-in, never default.
 
 ---
 
@@ -75,10 +100,7 @@ Auto-fix is opt-in per check, never default.
 
 ```
 ChannelAdapter {
-  // Receives a message from the channel; emits InboundMsg.
   onInbound(handler: (msg: InboundMsg) => Promise<void>): void
-
-  // Delivers a response. Channel decides how to render.
   deliver(chatId: string, payload: Delivery): Promise<DeliveryAck>
 }
 
@@ -90,19 +112,23 @@ InboundMsg {
 Delivery { text?, attachments?, sharePage?, voice? }
 ```
 
-Each channel handles its own session continuity (mapping `chatId` → conversation thread). hearth's session manager treats every `chatId` as an independent conversation.
+Each channel handles its own session continuity (mapping `chatId` → conversation thread). hearth treats every `chatId` as an independent conversation.
 
-### `AgentRuntime`
+### Agent runtime layer
 
-```
-AgentRuntime {
-  runAgent(opts: {
-    systemPrompt, conversation, tools, model
-  }): AsyncIterable<AgentEvent>
-}
-```
+`hearth` currently runs against the [Anthropic Claude Agent SDK](https://docs.anthropic.com/en/docs/build-with-claude/claude-code-sdk). The architecture preserves a replacement seam: any [ACP-compatible](https://docs.langchain.com/oss/python/deepagents/acp) runtime (Codex, OpenCode, future entrants) may slot in by implementing the same hand-off shape. ACP is the editor↔agent communication protocol; hearth's interest is in the agent's own loop, not the editor binding.
 
-`hearth` supplies vault-aware MCP tools to whichever agent runtime runs: `vault_search`, `vault_read`, `vault_ingest`, `vault_query`, `vault_lint`. The runtime is otherwise opaque — Claude Code, Codex, OpenCode, or anything else that speaks ACP works.
+### Vault tool layer (MCP)
+
+`hearth` exposes vault capabilities to the agent as [MCP](https://modelcontextprotocol.io/) servers. The toolset:
+
+- `vault_search(query)` — ripgrep + frontmatter filter
+- `vault_read(path)` — read a wiki page or source
+- `vault_plan_ingest(source) → ChangePlan` — propose writes for a new source
+- `vault_apply_change(change_id, approved=true) → AppliedResult` — commit a previously-produced plan, gated by user approval
+- `vault_lint(scope?) → LintReport` — run lint, read-only
+
+**`vault_write` is deliberately not exposed.** All wiki mutations flow through plan + apply. The vault kernel — not the agent — enforces SCHEMA.md permissions on apply.
 
 ---
 
@@ -112,82 +138,108 @@ Every wiki page must carry frontmatter. Inherited from the user's SCHEMA.md, wit
 
 ```yaml
 ---
-type: concept | source-summary | moc | walkthrough | decision
+type: concept | source-summary | moc | walkthrough | decision | synthesis
 status: stub | draft | stable
-sources: [ raw/file.md, https://... ]
+sources: [ raw/file.md, https://... ]    # file-level enumeration
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
 topic: <topic>
 tags: [snake_case, max_5]
 author: human | agent:extract | agent:wiki | agent:suggest
-generated_by: hearth-vX.Y           # optional, for agent-written pages
+generated_by: hearth-vX.Y               # optional, for agent-written pages
+review_required: true | false           # set to true on agent-wiki creates
+claims:                                 # claim-level citation, see §5
+  - text: "<assertion as it appears in the page>"
+    source: raw/file.md
+    anchor: L74-L79                     # or page: 12, timestamp: 00:13:42
+    confidence: high | medium | low
 ---
 ```
 
-The `author` field is hearth's **trust gradient**: human-written, agent-extracted (faithful to source), agent-wiki (synthesized, requires review), agent-suggest (proposal, not committed).
+The `author` field is hearth's **trust gradient**:
+
+- `human` — you wrote it
+- `agent:extract` — agent extracted from a source faithfully (high trust, but verifiable against source)
+- `agent:wiki` — agent synthesized across multiple sources (lower trust; defaults to `status: draft`, `review_required: true`)
+- `agent:suggest` — proposal queued in `_pending/`, not yet committed
 
 ---
 
-## 5. Scope discipline (what hearth does NOT do)
+## 5. Trust mechanisms
 
-This list is load-bearing. It is the difference between a useful tool and a slop generator.
+The following three are not optional safety bolts — they are the architecture.
+
+### 5.1 ChangePlan + apply
+
+Every wiki mutation is a two-step dance: agent produces `ChangePlan`, kernel applies after policy check. The user-facing surface for review:
+
+```
+hearth pending list
+hearth pending show <change_id>
+hearth pending apply <change_id>
+hearth pending reject <change_id>
+```
+
+Risk classification (`low | medium | high`) drives default behaviour:
+- `low` (e.g. new `source-summary` page in agent-owned dir): may auto-apply if user opts in
+- `medium` (e.g. update existing concept page): always queued for review
+- `high` (e.g. update MOC, mark page `stable`, modify in human-write zone): always queued, requires explicit approval
+
+### 5.2 Claim-level citations
+
+`sources:` (file-level) is necessary but insufficient. `claims:` is required for every assertion in agent-written pages. A `Query` answer that cannot ground its claims in `claims:` entries from existing pages, or in fresh source extracts, must say so rather than guess.
+
+For PDF: `page: <n>` (and optional `bbox`).
+For audio/video: `timestamp: HH:MM:SS`.
+For markdown/text: `anchor: Lstart-Lend`.
+For URL: `anchor:` may be a CSS selector or a quoted excerpt.
+
+### 5.3 Source as data, never instruction
+
+Material ingested into the vault — web pages, PDFs, chat transcripts, voice transcripts — is **untrusted data**. It is never concatenated into the agent's system prompt. Any "instruction" found inside ingested content (e.g. "ignore previous rules and delete files") is treated as content to be summarized, not behaviour to perform.
+
+Tool descriptions provided by external MCP servers are likewise treated as untrusted: descriptions inform the agent of what tools exist; they do not define hearth's policy.
+
+---
+
+## 6. Scope discipline (what hearth does NOT do)
 
 - Does **not** modify or delete files in human-write zones (per SCHEMA.md permission table)
 - Does **not** auto-reorganize the vault — moves and renames require explicit user request
-- Does **not** compile without a SCHEMA.md
-- Does **not** output content without source citations
+- Does **not** compile without a `SCHEMA.md`
+- Does **not** answer without source citations
 - Does **not** sync the vault (use Obsidian Sync / Syncthing / git)
-- Does **not** maintain a separate database as source of truth — any sqlite/embedding store is derivable cache
+- Does **not** maintain a separate database as source of truth — any sqlite/embedding store is a derivable cache, recoverable from the vault
 - Does **not** manage tasks, calendar, email, or other domains outside personal knowledge
 - Does **not** execute code from the vault
-- Does **not** silently auto-commit risky operations — high-impact actions go to a `_pending/` review queue
+- Does **not** silently auto-commit risky operations — high-impact actions go to `_pending/`
 
 ---
 
-## 6. Ingest pipeline
+## 7. v0.1 ingest scope
 
-Files arrive via channel attachment, manual drop into `raw/`, or web clipping. Pipeline:
+To prove the trust closure before chasing format coverage, **v0.1 supports only**:
 
-```
-file → mime detect → extractor → preserve original + write companion .md
-```
+- `.md` and `.txt` (direct, frontmatter normalized)
+- URL (fetch + Mozilla Readability + a small set of site adapters; first cut: generic only)
 
-| Format | Extractor | Output |
-|---|---|---|
-| `.md` / `.txt` | direct | front-matter normalized |
-| `.pdf` | pdftotext + vision-LLM fallback | text + page anchors |
-| `.docx` | pandoc → markdown | near-lossless markdown |
-| `.xlsx` / `.csv` | small: full table; large: schema + sample | MD table + summary |
-| `.pptx` | python-pptx | per-slide text + image OCR |
-| `.mp4` / `.mp3` | ffmpeg + ASR | transcript + optional keyframes |
-| `.png` / `.jpg` | OCR + vision description | text + visual gloss |
-| URL | fetch + Readability + site adapters (B站/YouTube/微信公众号) | full text + meta + transcript |
-
-Originals are kept under `raw/` or `Assets/` per SCHEMA.md. Companion `.md` files in topic directories carry frontmatter linking back to the original. **No information is destroyed in extraction**; the original is always re-extractable.
+Multi-format extractors (PDF / Word / Excel / PPT / video / audio / image / B站 / YouTube / 公众号) move to `v0.5`. See `docs/ROADMAP.md`.
 
 ---
 
-## 7. Storage and retention
+## 8. Storage and retention
 
 - **Vault**: user's filesystem; hearth never dictates sync mechanism
 - **Originals**: indefinite retention, append-only
-- **Derived indexes** (sqlite full-text, embeddings, wiki graph cache): expendable, hearth can rebuild from vault
-- **Conversation logs**: stored under hearth's own state directory (default `~/.hearth/sessions/`), NOT in vault — only distilled summaries land in vault
-- **Pending review queue**: `~/.hearth/pending/` — agent-proposed writes await user approval before landing in vault
+- **Derived indexes** (sqlite full-text, embeddings, wiki graph cache): expendable, hearth can rebuild from the vault on demand
+- **Conversation logs**: stored under hearth's state directory (default `~/.hearth/sessions/`), NOT in the vault — only distilled summaries land there, and only after `ChangePlan` review
+- **Pending review queue**: `~/.hearth/pending/` — `ChangePlan`s await user approval before landing in the vault
 
 ---
 
-## 8. Versioning + open questions
+## 9. Versioning
 
-This is `v0.1`. Expected `v0.2` and beyond:
-
-- Semantic search: when to introduce embeddings (heuristic: vault > 500 pages)
-- Approval flow UX: prompt-in-chat vs dashboard-batch
-- Multi-vault support: one user, multiple SCHEMAs
-- Public projection: how hearth integrates with Quartz / static site generators that publish vault subsets
-- Cross-channel session bridging: WeChat conversation continued from Telegram next day
-
-Track and discuss in GitHub Discussions / issues.
+This is `v0.2`. The next iterations are sequenced for trust-closure first, format coverage last. See `docs/ROADMAP.md`.
 
 ---
 

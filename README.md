@@ -1,31 +1,61 @@
 # hearth
 
-> Tend your second brain. Karpathy LLM Wiki runtime — chat-first, vault-native, agent-agnostic.
+> Capture anywhere. Compile into your markdown vault. Ask with citations.
 
-**Status**: pre-alpha. [SPEC.md v0.1](./docs/SPEC.md) is the contract; reference channel adapter follows.
+**Status**: pre-alpha. [SPEC v0.2](./docs/SPEC.md) is the contract; the [v0.1 reference loop](./docs/ROADMAP.md) is being built next.
 
 🔗 [tendhearth.com](https://tendhearth.com) — landing
 
-`hearth` is a personal AI runtime that sits between your channels (chat, voice) and your plain-markdown vault. It implements [Andrej Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f): you drop sources into `raw/`, the agent compiles them into a structured wiki, you query and live in the result.
+`hearth` is a personal AI runtime for your plain-markdown vault. It implements [Andrej Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — sources go in, an agent compiles them into a structured wiki, queries return citation-grounded answers, periodic lint keeps the wiki clean.
 
-## What hearth does
+## What makes hearth different
 
-Three verbs (borrowed from the schema you write yourself):
+There are already a handful of "Karpathy LLM Wiki implementations". `hearth` is one — but its differentiation is in **how it makes the wiki trustworthy**:
 
-- **Ingest** — new source enters the vault → agent reads it, summarizes, extracts concepts, links them, updates the topic MOC
-- **Query** — you ask a question → agent answers with citations from the wiki, writes new insights back so they don't get lost in chat
-- **Lint** — periodic audit of contradictions, orphan pages, single-source claims, missing cross-references
+- **Transaction-controlled writes.** The agent never writes the vault directly. It produces a `ChangePlan`; a vault kernel applies it after permission and policy checks. You can run hearth for a week and never find a wiki page you didn't approve.
+- **Claim-level citations.** Every assertion in an agent-written page anchors to a specific source location — file + line, page number for PDFs, timestamp for video. "Cite the file" isn't enough; you cite the line.
+- **Source-as-data.** Web pages, PDFs, chat transcripts ingested into the vault are treated as untrusted data, never as instruction. A malicious blog post cannot hijack the agent.
+- **Channel-first capture.** The other half of the differentiation: capture happens where you are (your phone, in WeChat, mid-conversation, by voice) — not where you wish you were (sitting at your desk, opening Obsidian).
+
+## Three verbs
+
+```
+Ingest   →  new source enters → agent produces a ChangePlan; pending review queue
+Query    →  ask in chat / voice → answer with claim-level citations
+Lint     →  periodic audit → contradictions, orphans, drift, single-source claims
+```
+
+## Five-minute demo (target shape; v0.1 is being built)
+
+```bash
+hearth init ~/vault --template default
+hearth ingest examples/karpathy-llm-wiki.md
+hearth pending list                        # see what the agent proposes
+hearth pending apply <change_id>           # commit after review
+hearth query "How is LLM Wiki different from RAG?"
+hearth lint
+```
+
+Expected output:
+
+- 1 `source-summary` page
+- ~6 `concept` pages
+- 1 MOC update
+- 1 citation-grounded answer (every claim anchored to a source line)
+- 1 lint report (likely "no issues" on a single-source vault)
 
 ## What hearth is
 
-- A **runtime**, not a UI. Obsidian (or Logseq, or Foam, or any plain-md editor) stays your editor.
-- A **glue layer** between channels (today: WeChat via [wechat-cc](https://github.com/ggshr9/wechat-cc); coming: telegram, voice, cli) and ACP-compatible agents (Claude Code, Codex, etc.)
-- **Channel-agnostic, agent-agnostic, editor-agnostic** — the only thing it cares about is your `vault/` of plain markdown plus your `SCHEMA.md`
+A runtime, not a UI. Obsidian — or Logseq, Foam, plain text — stays your editor. `hearth` is the agent that lives between your channels and your vault, always-on but never in the way.
+
+- **Channel-agnostic** — WeChat first via [`wechat-cc`](https://github.com/ggshr9/wechat-cc); telegram and voice next
+- **Agent-runtime-flexible** — currently runs on the Anthropic Claude Agent SDK; architecturally pluggable for ACP-compatible runtimes (Codex, OpenCode, future entrants)
+- **Editor-agnostic** — your vault is plain markdown, no lock-in
 
 ## What hearth is NOT
 
-- Not another PKM tool (use Obsidian/Logseq for that)
-- Not a chatbot framework (see OpenClaw)
+- Not another note-taking app (use Obsidian / Logseq / Foam)
+- Not a chatbot framework (see [OpenClaw](https://github.com/SamurAIGPT/awesome-openclaw))
 - Not an OS or a database — files on disk, plain text, no lock-in
 - Not a vendor-managed service (open source, self-hosted; optional hosted services may exist later)
 
@@ -33,42 +63,54 @@ Three verbs (borrowed from the schema you write yourself):
 
 | neighbor | what they do | how hearth differs |
 |---|---|---|
-| [Obsidian Copilot](https://github.com/logancyang/obsidian-copilot) | in-vault AI assistant (Obsidian plugin) | runtime, not a plugin — works without Obsidian running |
-| [obsidian-mcp-server](https://github.com/cyanheads/obsidian-mcp-server) | MCP server exposing vault | hearth includes ingest/query/lint pipelines, not just CRUD tools |
-| [SamurAIGPT/llm-wiki-agent](https://github.com/SamurAIGPT/llm-wiki-agent) | Karpathy LLM Wiki via Claude Code | hearth adds chat/voice channels + ACP-flexible runtime + cross-channel memory |
-| [OpenClaw](https://github.com/SamurAIGPT/awesome-openclaw) | multi-channel bot framework | hearth focuses on vault-as-substrate; planning to reuse OpenClaw channel adapters where they fit |
+| [SamurAIGPT/llm-wiki-agent](https://github.com/SamurAIGPT/llm-wiki-agent) | Karpathy LLM Wiki via Claude Code | hearth adds chat/voice channels + transaction-controlled writes + claim-level citations |
+| [NicholasSpisak/second-brain](https://github.com/NicholasSpisak/second-brain) | Karpathy LLM Wiki for Obsidian | same pattern, but desktop-only; hearth is multi-channel runtime |
+| [obsidian-mcp-server](https://github.com/cyanheads/obsidian-mcp-server) | MCP server exposing vault CRUD | hearth includes Ingest/Query/Lint pipelines + the trust mechanisms — not just CRUD tools |
+| [obsidian-copilot](https://github.com/logancyang/obsidian-copilot) | in-vault AI assistant (Obsidian plugin) | hearth is a runtime, not a plugin — works without Obsidian running |
+| [OpenClaw](https://github.com/SamurAIGPT/awesome-openclaw) | multi-channel bot framework | complementary; hearth focuses on vault as substrate; planning to reuse OpenClaw channel adapters |
 | [memex-lab/memex](https://github.com/memex-lab/memex) | Flutter PKM with multi-agent capture | hearth is plain-md filesystem (no app), runtime not application |
 
 ## Architecture (sketch)
 
 ```
 Channels (consumable, swappable)
-  wechat | telegram | voice | cli | email | ...
+  wechat-cc | telegram-cc | voice-app | cli | email | ...
                 ↓ (InboundMsg)        ↑ (Delivery)
        ┌─────────── hearth ───────────┐
-       │  - Ingest pipeline           │
-       │  - Query (with citations)    │
-       │  - Lint (periodic audit)     │
-       │  - Cross-channel memory FS   │
-       │  - Companion scheduler       │
+       │  Ingest  →  ChangePlan       │
+       │  Query   →  Answer + claims  │
+       │  Lint    →  Report           │
+       │  Pending review queue        │
+       │  Cross-channel memory FS     │
+       │  Companion scheduler         │
        └────┬───────────────┬─────────┘
-            │ ACP           │ filesystem (per SCHEMA.md)
+            │ Agent SDK     │ vault kernel (filesystem + SCHEMA.md perms)
             ↓               ↓
-       Agent runtime   ~/vault/
-       (Claude Code,    raw/  (sources, append-only)
-        Codex, ...)     <topic dirs>/  (agent-maintained wiki)
-                        SCHEMA.md  (human-governed)
+       Claude Agent     ~/vault/
+       SDK (or          raw/         (sources, append-only)
+       ACP-compat)      <topic>/     (agent-maintained wiki)
+                        SCHEMA.md    (human-governed)
 ```
+
+## Documentation
+
+- [`docs/SPEC.md`](./docs/SPEC.md) — public contract: verbs, interfaces, scope discipline
+- [`docs/ROADMAP.md`](./docs/ROADMAP.md) — version path (trust closure first, format coverage last)
+- [`docs/SECURITY.md`](./docs/SECURITY.md) — threat model + the three trust pillars
+- [`docs/why.md`](./docs/why.md) — pattern background + design discipline
 
 ## Status
 
 - [x] Naming + initial repo
-- [x] SPEC.md v0.1 — public contract (verbs + interfaces + scope discipline)
-- [ ] First reference channel adapter (wechat-cc → hearth)
-- [ ] Ingest pipeline v0 (markdown + URL)
-- [ ] Query v0 (with citation enforcement)
-- [ ] Lint v0
-- [ ] Multi-format extractors (PDF / Word / Excel / video)
+- [x] Landing ([tendhearth.com](https://tendhearth.com))
+- [x] [SPEC v0.2](./docs/SPEC.md) — public contract
+- [x] [ROADMAP](./docs/ROADMAP.md) — trust-closure-first sequencing
+- [x] [SECURITY](./docs/SECURITY.md) — threat model + three trust pillars
+- [ ] v0.1 CLI core loop
+- [ ] v0.2 pending review + diff
+- [ ] v0.3 wechat-cc → hearth channel adapter
+- [ ] v0.4 voice memo capture
+- [ ] v0.5 multi-format extractors
 
 ## License
 
