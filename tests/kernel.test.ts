@@ -230,6 +230,138 @@ describe('hearth v0.1 — core trust loop', () => {
     });
   });
 
+  describe('Test 4b: transaction hardening — apply is all-or-nothing (v0.1.1)', () => {
+    it('apply writes nothing when later op in the plan fails preflight', () => {
+      const vault = makeVault(true);
+      const schema = loadSchema(vault);
+      const kernel = createKernel(vault, schema);
+
+      // op[0] is legal: create in agent-write zone
+      // op[1] is illegal: write to 00 Inbox/ which agent has 'none' on
+      const plan: ChangePlan = {
+        change_id: 'test-partial',
+        source_id: 'sha256:fake',
+        risk: 'low',
+        ops: [
+          {
+            op: 'create',
+            path: '01 Topics/legal-first.md',
+            reason: 'should not survive — paired with an illegal sibling',
+            precondition: { exists: false },
+            patch: { type: 'replace', value: '# Should not exist after apply\n' },
+          },
+          {
+            op: 'create',
+            path: '00 Inbox/illegal-sibling.md',
+            reason: 'agent has none on 00 Inbox/',
+            precondition: { exists: false },
+            patch: { type: 'replace', value: '# Nope\n' },
+          },
+        ],
+        requires_review: true,
+        created_at: new Date().toISOString(),
+      };
+
+      const result = kernel.apply(plan);
+
+      expect(result.ok).toBe(false);
+      // Both ops report — the legal one was 'skipped' because its sibling failed
+      expect(result.ops).toHaveLength(2);
+      expect(result.ops[0]?.error).toMatch(/skipped/);
+      expect(result.ops[1]?.error).toMatch(/agent lacks create permission/);
+
+      // Crucially: NEITHER file lands on disk.
+      expect(existsSync(join(vault, '01 Topics/legal-first.md'))).toBe(false);
+      expect(existsSync(join(vault, '00 Inbox/illegal-sibling.md'))).toBe(false);
+    });
+
+    it('apply rejects an absolute path explicitly (no traversal probing required)', () => {
+      const vault = makeVault(true);
+      const schema = loadSchema(vault);
+      const kernel = createKernel(vault, schema);
+
+      const plan: ChangePlan = {
+        change_id: 'test-abs',
+        source_id: 'sha256:fake',
+        risk: 'low',
+        ops: [{
+          op: 'create',
+          path: '/etc/passwd',
+          reason: 'attempted absolute path',
+          precondition: { exists: false },
+          patch: { type: 'replace', value: 'nope' },
+        }],
+        requires_review: true,
+        created_at: new Date().toISOString(),
+      };
+
+      const result = kernel.apply(plan);
+      expect(result.ok).toBe(false);
+      expect(result.ops[0]?.error).toMatch(/absolute path not allowed/);
+    });
+
+    it('apply rejects unsupported patch.type at preflight without writing anything', () => {
+      const vault = makeVault(true);
+      const schema = loadSchema(vault);
+      const kernel = createKernel(vault, schema);
+
+      const plan: ChangePlan = {
+        change_id: 'test-unsupported',
+        source_id: 'sha256:fake',
+        risk: 'low',
+        ops: [
+          {
+            op: 'create',
+            path: '01 Topics/would-write.md',
+            reason: 'paired with unsupported patch on next op',
+            precondition: { exists: false },
+            patch: { type: 'replace', value: '# Would write\n' },
+          },
+          {
+            op: 'create',
+            path: '01 Topics/diff-not-supported.md',
+            reason: 'unified_diff parsed but not applied in v0.1',
+            precondition: { exists: false },
+            patch: { type: 'unified_diff', value: '@@ -1 +1 @@\n-old\n+new\n' },
+          },
+        ],
+        requires_review: true,
+        created_at: new Date().toISOString(),
+      };
+
+      const result = kernel.apply(plan);
+      expect(result.ok).toBe(false);
+      expect(result.ops[1]?.error).toMatch(/patch\.type=replace only/);
+      // Sibling did NOT land
+      expect(existsSync(join(vault, '01 Topics/would-write.md'))).toBe(false);
+    });
+
+    it('apply rejects path traversal via ..', () => {
+      const vault = makeVault(true);
+      const schema = loadSchema(vault);
+      const kernel = createKernel(vault, schema);
+
+      const plan: ChangePlan = {
+        change_id: 'test-traversal',
+        source_id: 'sha256:fake',
+        risk: 'low',
+        ops: [{
+          op: 'create',
+          path: '../escape.md',
+          reason: 'attempted traversal',
+          precondition: { exists: false },
+          patch: { type: 'replace', value: 'nope' },
+        }],
+        requires_review: true,
+        created_at: new Date().toISOString(),
+      };
+
+      const result = kernel.apply(plan);
+      expect(result.ok).toBe(false);
+      expect(result.ops[0]?.error).toMatch(/path escapes vault|absolute path/);
+    });
+  });
+
   describe('schema permission helpers', () => {
     it('agent may add to raw/ but not modify', () => {
       const vault = makeVault(true);

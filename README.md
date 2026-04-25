@@ -2,7 +2,7 @@
 
 > Capture anywhere. Compile into your markdown vault. Ask with citations.
 
-**Status**: pre-alpha. [SPEC v0.2](./docs/SPEC.md) is the contract; the [v0.1 reference loop](./docs/ROADMAP.md) is being built next.
+**Status**: pre-alpha. [SPEC v0.2.1](./docs/SPEC.md) is the contract; v0.1 deterministic kernel is partially implemented — `init`, `ingest`, `pending list/show/apply` work end-to-end with mock ingest + transaction-hardened apply. No LLM, query, or lint yet.
 
 🔗 [tendhearth.com](https://tendhearth.com) — landing
 
@@ -103,11 +103,15 @@ Channels (consumable, swappable)
 
 - [x] Naming + initial repo
 - [x] Landing ([tendhearth.com](https://tendhearth.com))
-- [x] [SPEC v0.2](./docs/SPEC.md) — public contract
+- [x] [SPEC v0.2.1](./docs/SPEC.md) — public contract
 - [x] [ROADMAP](./docs/ROADMAP.md) — trust-closure-first sequencing
 - [x] [SECURITY](./docs/SECURITY.md) — threat model + three trust pillars
-- [ ] v0.1 CLI core loop
-- [ ] v0.2 pending review + diff
+- [x] v0.1 deterministic kernel: init / ingest / pending list/show/apply (mock ingest, no LLM)
+- [x] v0.1.1 transaction hardening: preflight-then-write (ChangePlan applies all-or-nothing)
+- [ ] v0.1 query (with claim-grounding enforcement)
+- [ ] v0.1 lint (citation-drift, single-source-stable, orphan, raw append-only)
+- [ ] v0.1 Claude Agent SDK integration (replace mock ingest)
+- [ ] v0.2 pending review + diff + rebase
 - [ ] v0.3 wechat-cc → hearth channel adapter
 - [ ] v0.4 voice memo capture
 - [ ] v0.5 multi-format extractors
