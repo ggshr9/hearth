@@ -80,12 +80,25 @@ async function handleApply(
   if (!token) {
     return staleTokenPage('missing token');
   }
+  // Quick token validity check (without consuming) to fail early on bad tokens,
+  // before attempting to load the plan. This ensures token errors (403) are
+  // reported before plan-not-found errors (404).
+  try {
+    verifyToken({ token, change_id: changeId, required_scope: 'low' });
+  } catch (e) {
+    void audit(opts.vaultRoot, {
+      event: 'approval_token.rejected',
+      initiated_by: 'review-server',
+      data: { change_id: changeId, reason: (e as Error).message },
+    });
+    return staleTokenPage((e as Error).message);
+  }
   // Load plan to determine required scope
   let plan;
   try { plan = store.load(changeId); }
   catch { return errorPage(404, 'plan not found', `pending plan <code>${escapeHtml(changeId)}</code> not found`); }
   const requiredScope: Risk = classifyRisk(plan);
-  // Verify and consume token
+  // Verify and consume token with the required scope
   let payload;
   try {
     payload = verifyAndConsume({ token, change_id: changeId, required_scope: requiredScope });
@@ -128,6 +141,46 @@ async function handleApply(
   return errorPage(409, 'apply failed', escapeHtml(result.error ?? 'kernel rejected'));
 }
 
+async function handleReject(
+  opts: ReviewServerOptions,
+  store: PendingStore,
+  changeId: string,
+  token: string,
+): Promise<Response> {
+  if (!token) {
+    return staleTokenPage('missing token');
+  }
+  // Reject is always low-scope: declining a plan doesn't require apply-level
+  // authority. Verify token first (before loading plan) so that token consumption
+  // is detected before plan-not-found errors.
+  let payload;
+  try {
+    payload = verifyAndConsume({ token, change_id: changeId, required_scope: 'low' });
+  } catch (e) {
+    void audit(opts.vaultRoot, {
+      event: 'approval_token.rejected',
+      initiated_by: 'review-server',
+      data: { change_id: changeId, reason: (e as Error).message },
+    });
+    return staleTokenPage((e as Error).message);
+  }
+  void audit(opts.vaultRoot, {
+    event: 'approval_token.consumed',
+    initiated_by: 'review-server',
+    data: { change_id: changeId, jti: payload.jti },
+  });
+  let plan;
+  try { plan = store.load(changeId); }
+  catch { return errorPage(404, 'plan not found', `pending plan <code>${escapeHtml(changeId)}</code> not found`); }
+  store.remove(changeId);
+  void audit(opts.vaultRoot, {
+    event: 'changeplan.rejected',
+    initiated_by: 'review-server',
+    data: { change_id: changeId, ops: plan.ops.length, reason: 'user_rejected' },
+  });
+  return successPage(`rejected <code>${escapeHtml(changeId)}</code>.`);
+}
+
 export function startReviewServer(opts: ReviewServerOptions): ReviewServerHandle {
   const stateDir = opts.hearthStateDir;
   const store = new PendingStore(stateDir ? join(stateDir, 'pending') : undefined);
@@ -163,8 +216,7 @@ export function startReviewServer(opts: ReviewServerOptions): ReviewServerHandle
         return handleApply(opts, store, changeId!, token);
       }
       if (req.method === 'POST' && action === 'reject') {
-        // Task 11
-        return new Response('not implemented yet', { status: 501 });
+        return handleReject(opts, store, changeId!, token);
       }
       return new Response('not found', { status: 404 });
     },

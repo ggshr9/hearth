@@ -136,7 +136,7 @@ describe('review-server: POST /p/:id/apply', () => {
     expect(res.status).toBe(403);
   });
 
-  it('consumes the token (plan removed after apply; second POST returns 404)', async () => {
+  it('consumes the token (plan removed after apply; second POST returns 403)', async () => {
     const vault = makeVault();
     const stateDir = makeStateDir();
     const r = await ingestFromChannel(
@@ -149,8 +149,8 @@ describe('review-server: POST /p/:id/apply', () => {
     const u = `http://127.0.0.1:${handle.port}/p/${r.change_id}/apply?t=${encodeURIComponent(token)}`;
     expect((await fetch(u, { method: 'POST' })).status).toBe(200);
     // Token is consumed and plan is removed after successful apply.
-    // Second request fails to load plan (it was removed), returns 404.
-    expect((await fetch(u, { method: 'POST' })).status).toBe(404);
+    // Second request fails due to consumed token (403), not missing plan.
+    expect((await fetch(u, { method: 'POST' })).status).toBe(403);
   });
 
   it('returns 409 apply failed when kernel rejects (precondition violation)', async () => {
@@ -188,5 +188,64 @@ describe('review-server: POST /p/:id/apply', () => {
     const lines = readFileSync(auditLogPath(vault), 'utf8').split('\n').filter(Boolean);
     expect(lines.some(l => l.includes('changeplan.rejected'))).toBe(true);
     expect(lines.some(l => l.includes('approval_token.consumed'))).toBe(true);
+  });
+});
+
+describe('review-server: POST /p/:id/reject', () => {
+  it('removes the plan from pending and audits changeplan.rejected', async () => {
+    const vault = makeVault();
+    const stateDir = makeStateDir();
+    const r = await ingestFromChannel(
+      { channel: 'cli', message_id: 'rej-1', from: 'me', text: 'reject me',
+        received_at: new Date().toISOString() },
+      { vaultRoot: vault, agent: 'mock', hearthStateDir: stateDir },
+    );
+    const { token } = issueToken({ change_id: r.change_id!, issued_by: 'test' });
+    handle = startReviewServer({ port: 0, vaultRoot: vault, hearthStateDir: stateDir });
+    const res = await fetch(
+      `http://127.0.0.1:${handle.port}/p/${r.change_id}/reject?t=${encodeURIComponent(token)}`,
+      { method: 'POST' },
+    );
+    expect(res.status).toBe(200);
+    // small delay so fire-and-forget audit lands
+    await new Promise(r => setTimeout(r, 100));
+    // plan gone from pending
+    const { PendingStore } = await import('../src/core/pending-store.ts');
+    const store2 = new PendingStore(join(stateDir, 'pending'));
+    expect(() => store2.load(r.change_id!)).toThrow();
+    // audit recorded changeplan.rejected
+    const { auditLogPath } = await import('../src/core/audit.ts');
+    const lines = readFileSync(auditLogPath(vault), 'utf8').split('\n').filter(Boolean);
+    expect(lines.some(l => l.includes('changeplan.rejected'))).toBe(true);
+  });
+
+  it('rejects POST reject without a token (403 STALE_TOKEN)', async () => {
+    const vault = makeVault();
+    const stateDir = makeStateDir();
+    handle = startReviewServer({ port: 0, vaultRoot: vault, hearthStateDir: stateDir });
+    const res = await fetch(`http://127.0.0.1:${handle.port}/p/whatever/reject`, { method: 'POST' });
+    expect(res.status).toBe(403);
+  });
+
+  it('consumes the token (cannot reject + apply with the same token)', async () => {
+    const vault = makeVault();
+    const stateDir = makeStateDir();
+    const r = await ingestFromChannel(
+      { channel: 'cli', message_id: 'rej-2', from: 'me', text: 'reject then apply',
+        received_at: new Date().toISOString() },
+      { vaultRoot: vault, agent: 'mock', hearthStateDir: stateDir },
+    );
+    const { token } = issueToken({ change_id: r.change_id!, issued_by: 'test' });
+    handle = startReviewServer({ port: 0, vaultRoot: vault, hearthStateDir: stateDir });
+    // Reject first
+    expect((await fetch(
+      `http://127.0.0.1:${handle.port}/p/${r.change_id}/reject?t=${encodeURIComponent(token)}`,
+      { method: 'POST' },
+    )).status).toBe(200);
+    // Token now consumed; second action with same token should fail
+    expect((await fetch(
+      `http://127.0.0.1:${handle.port}/p/${r.change_id}/apply?t=${encodeURIComponent(token)}`,
+      { method: 'POST' },
+    )).status).toBe(403);
   });
 });
