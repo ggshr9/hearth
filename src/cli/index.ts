@@ -206,7 +206,39 @@ function cmdPending(positionals: string[], values: Record<string, string | boole
     }
     return;
   }
-  fail(`pending: unknown subcommand "${sub}". expected: list | show | apply`);
+  if (sub === 'share') {
+    const id = positionals[1];
+    if (!id) fail('pending share: missing <change_id>. usage: hearth pending share <id> [--vault <dir>] [--state-dir <dir>]');
+    const vault = resolve((values.vault as string) ?? process.cwd());
+    const stateDir = (values['state-dir'] as string) ?? undefined;
+    void (async () => {
+      const server = startReviewServer({ port: 0, vaultRoot: vault, hearthStateDir: stateDir });
+      const mgr = new TunnelManager({
+        binary: process.env.HEARTH_TUNNEL_BINARY,
+        localPort: server.port, idleCloseMs: 10 * 60_000,
+      });
+      try {
+        const tunnelUrl = await mgr.ensureUrl();
+        const { token } = issueToken({ change_id: id, issued_by: 'cli:share' });
+        const url = `${tunnelUrl}/p/${encodeURIComponent(id)}?t=${encodeURIComponent(token)}`;
+        process.stdout.write(`${url}\n`);
+        process.stdout.write(`local server: http://127.0.0.1:${server.port}\n`);
+        process.stdout.write(`stop with Ctrl-C\n`);
+        await new Promise<void>(r => {
+          process.on('SIGINT', () => r());
+          process.on('SIGTERM', () => r());
+        });
+      } catch (e) {
+        process.stderr.write(`pending share: ${(e as Error).message}\n`);
+        process.exitCode = 1;
+      } finally {
+        await mgr.close();
+        server.stop();
+      }
+    })();
+    return;
+  }
+  fail(`pending: unknown subcommand "${sub}". expected: list | show | apply | share`);
 }
 
 function cmdQuery(positionals: string[], values: Record<string, string | boolean | undefined>): void {
