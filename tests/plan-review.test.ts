@@ -94,7 +94,7 @@ describe('renderPlanReview html', () => {
     expect(html).toContain('06 Hearth Inbox/note.md');
   });
 
-  it('honors aesthetic restraint (no shadows / gradients / emoji / external assets)', () => {
+  it('honors aesthetic restraint (no shadows / gradients / animations / emoji / external assets / inline JS)', () => {
     const out = renderPlanReview(PLAN, {
       format: 'html',
       capabilityBase: 'https://abc-1.trycloudflare.com',
@@ -102,12 +102,15 @@ describe('renderPlanReview html', () => {
     });
     if (out.format !== 'html') throw new Error('narrow');
     const html = out.html;
-    expect(html).not.toMatch(/box-shadow|drop-shadow/);
+    expect(html).not.toMatch(/box-shadow|drop-shadow|text-shadow/);
     expect(html).not.toMatch(/linear-gradient|radial-gradient/);
+    expect(html).not.toMatch(/transition\s*:|animation\s*:/);
     expect(html).not.toMatch(/🎉|✅|❌|🔥|📋/);
     // No external script or stylesheet refs
     expect(html).not.toMatch(/<link[^>]+href=/);
     expect(html).not.toMatch(/<script[^>]+src=/);
+    // No inline event handlers
+    expect(html).not.toMatch(/\bon\w+=/);
   });
 
   it('renders approve and reject form actions bound to the capability URL', () => {
@@ -118,9 +121,33 @@ describe('renderPlanReview html', () => {
     });
     if (out.format !== 'html') throw new Error('narrow');
     const html = out.html;
-    expect(html).toContain('action="/p/cp-001/apply?t=tok-xyz"');
-    expect(html).toContain('action="/p/cp-001/reject?t=tok-xyz"');
+    expect(html).toContain('formaction="/p/cp-001/apply?t=tok-xyz"');
+    expect(html).toContain('formaction="/p/cp-001/reject?t=tok-xyz"');
     expect(html).toContain('method="post"');
+  });
+
+  it('HTML-escapes user-controlled strings in op fields', () => {
+    const evilPlan: ChangePlan = {
+      ...PLAN,
+      ops: [{
+        ...PLAN.ops[0]!,
+        reason: '<script>alert(1)</script>',
+        path: '" onsubmit="evil',
+      }],
+    };
+    const out = renderPlanReview(evilPlan, { format: 'html', capabilityToken: 'tok' });
+    if (out.format !== 'html') throw new Error('narrow');
+    expect(out.html).not.toContain('<script>alert(1)</script>');
+    expect(out.html).not.toContain('" onsubmit="evil');
+    expect(out.html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+  });
+
+  it('capability token appears only in form action attributes', () => {
+    const out = renderPlanReview(PLAN, { format: 'html', capabilityToken: 'tok-secret-123' });
+    if (out.format !== 'html') throw new Error('narrow');
+    // Strip the form elements, then assert token is absent from the rest.
+    const withoutForms = out.html.replace(/<form[\s\S]*?<\/form>/g, '');
+    expect(withoutForms).not.toContain('tok-secret-123');
   });
 
   it('renders the proposed body inside <pre> for create ops', () => {

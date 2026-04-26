@@ -40,7 +40,10 @@ export interface RenderOptions {
   maxOpBodyLines?: number;
   /** For html only: include the per-plan capability URL token in form actions. */
   capabilityToken?: string;
-  /** For html only: capability URL base (e.g. https://abc.trycloudflare.com). */
+  /** For html only: capability URL base (e.g. https://abc.trycloudflare.com).
+   *  Reserved for future "copy link" / canonical-link rendering — currently
+   *  unused; the page uses relative form actions, which is correct for a
+   *  same-origin server-rendered page. */
   capabilityBase?: string;
 }
 
@@ -227,11 +230,9 @@ function renderHtml(_plan: ChangePlan, review: PlanReview, opts: RenderOptions):
   </div>
   ${noteHtml}
   ${opsHtml}
-  <form class="actions" method="post" action="${applyAction}">
-    <button type="submit" class="approve">approve</button>
-  </form>
-  <form class="actions" method="post" action="${rejectAction}" style="margin-top: -3.5rem;">
-    <button type="submit" class="reject">reject</button>
+  <form class="actions" method="post">
+    <button type="submit" class="approve" formaction="${applyAction}">approve</button>
+    <button type="submit" class="reject" formaction="${rejectAction}">reject</button>
   </form>
 </body>
 </html>`;
