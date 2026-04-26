@@ -10,8 +10,8 @@
     "hearth": "./src/cli/index.ts"
   },
   "scripts": {
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
     "typecheck": "tsc --noEmit",
     "cli": "bun src/cli/index.ts"
   },
