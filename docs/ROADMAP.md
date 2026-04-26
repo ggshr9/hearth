@@ -147,18 +147,117 @@ Now we earn the right to ingest the messy real world.
 
 ---
 
-## Beyond v0.5
+## v0.4 — Agent Interface & Audit
+
+The leap from "a runnable tool" to "the vault governance layer that any
+agent must use". See [`docs/PRODUCT.md`](./PRODUCT.md) for the doctrine.
+
+```
+hearth mcp serve                       stdio transport
+MCP tools (read):
+  vault_search / read / pending_list / pending_show / lint / doctor / query
+MCP tools (mutation):
+  vault_plan_ingest                    returns ChangePlan, queues to pending
+  vault_apply_change(id, token)        token-gated; without token returns
+                                       REQUIRES_HUMAN_APPROVAL
+MCP resources:
+  hearth://schema (with version_hash + last_modified)
+  hearth://vault-map
+  hearth://pending
+  hearth://lint-report
+  hearth://agent-instructions          (markdown — auto-prepended to agent system prompt)
+MCP prompts:
+  ingest_workflow / query_with_citations / lint_fix_workflow / restructure_discussion
+Approval-token protocol (HMAC, single-use, 5-min expiry, scoped to change_id)
+Audit log:
+  <vault>/.hearth/audit.jsonl          append-only, file-locked
+  hearth log [--since N] [--vault X]   human-readable timeline
+File locks on pending + audit writes
+Error codes: STALE_CONTEXT / REQUIRES_HUMAN_APPROVAL / REBASE_REQUIRED / STALE_TOKEN
+schema_hash_seen field on ChangePlan; validator checks
+docs/INTEGRATIONS.md                   Claude Code / Cursor / Codex MCP config snippets
+```
+
+**Done when**:
+- Claude Code with hearth MCP configured can run a multi-turn ingest +
+  pending review + (token-gated) apply on the user's actual vault
+- Audit log records every event; `hearth log` shows it human-readable
+- Two MCP-aware harnesses (Claude Code + Cursor) verified end-to-end against
+  the same vault without mutual interference
+
+Explicit non-goals (deferred to v0.5+):
+- No auto-rebase
+- No proposal expiration impl
+- No multi-vault impl
+- No audit log rotation
+- No full UI
+- Never expose raw `vault_write` / `vault_delete` / `vault_patch_anywhere`
+
+---
+
+## v0.5 — Auto-policy & resource staleness
+
+```
+auto_apply policy + risk classifier (heuristic)
+audit log rotation
+undo / replay
+fast mode / policy-bounded yolo
+vault_changed_since(ts) for richer staleness queries
+auto-rebase suggestion (still requires human confirmation)
+```
+
+**Done when**: a user can configure "auto-apply low-risk in Hearth Inbox,
+require review for everything else" and run for a week without spending
+attention on each capture.
+
+---
+
+## v0.6 — Views before Moves
+
+```
+07 Hearth Proposals/ staging dir
+auto-generated MOC / cluster views
+suggested merges
+restructure proposals
+proposal expiration (expires_at frontmatter)
+proposal dependency drift detection
+```
+
+**Done when**: a vault that has accumulated 200 messy notes can be browsed
+through agent-generated proposal views without any physical file moves; the
+user can promote individual proposals into structural changes.
+
+---
+
+## v0.7 — Human trust surface
+
+```
+local console (web app or native, single-page)
+batch review of pending plans
+weekly digest
+policy settings UI
+lint / doctor visualization
+multi-vault: per-vault policy + audit + cross-vault search w/ explicit perms
+```
+
+**Done when**: a non-programmer with an existing Obsidian vault can install
+hearth via a one-click installer, point it at their vault, and use it
+without ever touching the CLI.
+
+---
+
+## Beyond v0.7
 
 Parked deliberately:
 
 - Semantic search (embeddings) — only when ripgrep stops being enough; heuristic threshold ~500 wiki pages
-- Multi-vault support
 - Public projection / static-site rendering (Quartz integration patterns)
 - Cross-channel session bridging (continue a WeChat thread on Telegram tomorrow)
-- Telegram, Discord, voice-app, CLI, email channel adapters
-- Hosted services: TTS, ACP runtime, sync, managed install (these are not in the open-source core; they are services you optionally pay for)
+- Telegram, Discord, voice-app, email channel adapters
+- ACP server (currently we consume MCP; ACP is the inverse where we'd be the agent surface for an editor)
+- Hosted services: TTS, sync, managed install (these are not in the open-source core; they are services you optionally pay for)
 
-Track and discuss in GitHub Discussions / issues. PRs welcome but read SPEC.md first.
+Track and discuss in GitHub Discussions / issues. PRs welcome but read PRODUCT.md + SPEC.md first.
 
 ---
 

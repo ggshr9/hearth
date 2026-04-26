@@ -1,6 +1,7 @@
 # hearth
 
-> Capture anywhere. Compile into your markdown vault. Ask with citations.
+> The agent-native vault governance layer.
+> Any AI can participate in maintaining your markdown vault — but must respect permission, citation, review, and audit rules.
 
 **Status**: v0.1 complete (alpha). [SPEC v0.2.1](./docs/SPEC.md) is the contract; deterministic kernel + claim-grounded query + read-only lint + Claude / mock agent adapters work end-to-end. Next: wechat-cc as the first channel adapter (v0.3).
 
@@ -98,6 +99,7 @@ Channels (consumable, swappable)
 
 ## Documentation
 
+- [`docs/PRODUCT.md`](./docs/PRODUCT.md) — **product compass** (positioning, principles, what hearth is and isn't)
 - [`docs/SPEC.md`](./docs/SPEC.md) — public contract: verbs, interfaces, scope discipline
 - [`docs/ROADMAP.md`](./docs/ROADMAP.md) — version path (trust closure first, format coverage last)
 - [`docs/SECURITY.md`](./docs/SECURITY.md) — threat model + the three trust pillars
@@ -119,8 +121,12 @@ Channels (consumable, swappable)
 - [x] v0.3.x adopt + doctor — bring an existing vault into hearth without migrating files (`hearth adopt <vault>`, conservative defaults, idempotent); safety-ordered target dir selection in mock-adapter
 - [ ] v0.3.1 owner-only `/hearth` command surface over WeChat
 - [ ] v0.3.2 wechat-cc end-to-end demo (capture → pending → approve → query)
-- [ ] v0.4 voice memo capture
-- [ ] v0.5 multi-format extractors
+- [ ] v0.4 Agent Interface & Audit (MCP server + agent instruction pack + token-gated apply + hearth log)
+- [ ] v0.5 auto-policy + risk classifier + audit rotation
+- [ ] v0.6 Views before Moves (07 Hearth Proposals/, auto-generated MOC, restructure proposals)
+- [ ] v0.7 human trust surface (local console + multi-vault)
+- [ ] (deferred) voice memo capture
+- [ ] (deferred) multi-format extractors (PDF/Word/Excel/PPT/video/audio/image/B站/YouTube/公众号)
 
 ## License
 
