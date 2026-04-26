@@ -20,6 +20,7 @@ import type { AgentAdapter } from '../core/agent-adapter.ts';
 import { query, NO_ANSWER } from '../core/query.ts';
 import { lint } from '../core/lint.ts';
 import { ingestFromChannel } from '../runtime.ts';
+import { renderPlanReview } from '../core/plan-review.ts';
 import { buildProposal, applyProposal, renderProposalSummary } from './adopt.ts';
 import { runDoctor, renderDoctorReport } from './doctor.ts';
 import { startReviewServer } from '../review-server.ts';
@@ -147,7 +148,8 @@ async function cmdIngest(positionals: string[], values: Record<string, string | 
 
 function cmdPending(positionals: string[], values: Record<string, string | boolean | undefined>): void {
   const sub = positionals[0];
-  const store = new PendingStore();
+  const stateDir = (values['state-dir'] as string) ?? undefined;
+  const store = stateDir ? new PendingStore(join(stateDir, 'pending')) : new PendingStore();
   if (!sub || sub === 'list') {
     const plans = store.list();
     if (plans.length === 0) {
@@ -162,22 +164,12 @@ function cmdPending(positionals: string[], values: Record<string, string | boole
   if (sub === 'show') {
     const id = positionals[1];
     if (!id) fail('pending show: missing <change_id>');
-    const plan = store.load(id);
-    process.stdout.write(`change_id: ${plan.change_id}\n`);
-    process.stdout.write(`source_id: ${plan.source_id}\n`);
-    process.stdout.write(`risk: ${plan.risk}  requires_review: ${plan.requires_review}\n`);
-    process.stdout.write(`created: ${plan.created_at}\n`);
-    if (plan.note) process.stdout.write(`note: ${plan.note}\n`);
-    process.stdout.write(`\n${plan.ops.length} ops:\n`);
-    for (const op of plan.ops) {
-      process.stdout.write(`  [${op.op}] ${op.path}\n`);
-      process.stdout.write(`    reason: ${op.reason}\n`);
-      process.stdout.write(`    precondition: ${JSON.stringify(op.precondition)}\n`);
-      if (op.body_preview) {
-        const preview = op.body_preview.split('\n').slice(0, 3).join('\n      ');
-        process.stdout.write(`    preview:\n      ${preview}\n`);
-      }
-    }
+    let plan;
+    try { plan = store.load(id); }
+    catch (e) { fail((e as Error).message); }
+    const out = renderPlanReview(plan!, { format: 'ansi' });
+    if (out.format !== 'ansi') throw new Error('renderPlanReview did not return ansi');
+    process.stdout.write(out.text + '\n');
     return;
   }
   if (sub === 'apply') {
@@ -210,7 +202,6 @@ function cmdPending(positionals: string[], values: Record<string, string | boole
     const id = positionals[1];
     if (!id) fail('pending share: missing <change_id>. usage: hearth pending share <id> [--vault <dir>] [--state-dir <dir>]');
     const vault = resolve((values.vault as string) ?? process.cwd());
-    const stateDir = (values['state-dir'] as string) ?? undefined;
     void (async () => {
       const server = startReviewServer({ port: 0, vaultRoot: vault, hearthStateDir: stateDir });
       const mgr = new TunnelManager({
