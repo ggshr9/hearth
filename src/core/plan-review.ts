@@ -9,6 +9,10 @@ import type { ChangePlan, ChangeOpKind, Risk } from './types.ts';
 /** Default cap on body-preview lines per op for size-bounded surfaces. */
 const DEFAULT_OP_BODY_LINES = 40;
 
+/** Default cap on body-preview lines for terminal output (tighter than
+ *  the markdown default — terminal cells are precious). */
+const DEFAULT_OP_BODY_LINES_ANSI = 12;
+
 export interface PlanReviewOp {
   kind: ChangeOpKind;
   path: string;
@@ -87,7 +91,7 @@ export function renderPlanReview(plan: ChangePlan, opts: RenderOptions): RenderR
     case 'html':
       return { format: 'html', html: renderHtml(plan, review, opts) };
     case 'ansi':
-      throw new Error(`format ${opts.format} not implemented yet (Task 4)`);
+      return { format: 'ansi', text: renderAnsi(plan, review, opts) };
   }
 }
 
@@ -236,4 +240,30 @@ function renderHtml(_plan: ChangePlan, review: PlanReview, opts: RenderOptions):
   </form>
 </body>
 </html>`;
+}
+
+function renderAnsi(_plan: ChangePlan, review: PlanReview, opts: RenderOptions): string {
+  const previewN = opts.maxOpBodyLines ?? DEFAULT_OP_BODY_LINES_ANSI;
+  const lines: string[] = [];
+  lines.push(`change_id: ${review.change_id}`);
+  lines.push(`risk:      ${review.risk}    review: ${review.requires_review}    ops: ${review.ops.length}`);
+  lines.push(`created:   ${review.created_at}`);
+  if (review.note) lines.push(`note:      ${review.note}`);
+  lines.push('');
+  for (let i = 0; i < review.ops.length; i++) {
+    const op = review.ops[i]!;
+    lines.push(`[${op.kind}] ${op.path}`);
+    lines.push(`  reason: ${op.reason}`);
+    if (op.must_exist) lines.push(`  precondition: exists; base ${op.base_hash?.slice(0, 16) ?? '–'}`);
+    else lines.push(`  precondition: must not exist`);
+    if (op.after !== null) {
+      const body = op.after.split('\n').slice(0, previewN);
+      lines.push(`  body:`);
+      for (const ln of body) lines.push(`    ${ln}`);
+      const more = op.after.split('\n').length - previewN;
+      if (more > 0) lines.push(`    … (+${more} more lines)`);
+    }
+    lines.push('');
+  }
+  return lines.join('\n').trimEnd();
 }

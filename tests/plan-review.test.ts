@@ -162,8 +162,19 @@ describe('renderPlanReview html', () => {
   });
 });
 
-describe('renderPlanReview unimplemented formats', () => {
-  it('throws for ansi (Task 4 lands the ansi format)', () => {
-    expect(() => renderPlanReview(PLAN, { format: 'ansi' })).toThrow(/not implemented/);
+describe('renderPlanReview ansi (CLI text)', () => {
+  it('produces a structured terminal-friendly text block', () => {
+    const out = renderPlanReview(PLAN, { format: 'ansi' });
+    expect(out.format).toBe('ansi');
+    if (out.format !== 'ansi') throw new Error('narrow');
+    const text = out.text;
+    expect(text).toContain('cp-001');
+    expect(text).toContain('medium');
+    expect(text).toContain('06 Hearth Inbox/note.md');
+    // No emoji, no ANSI escape sequences in v1 (plain text)
+    expect(text).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
+    expect(text).not.toMatch(/\x1b\[/);
+    // Body preview is indented under the op header
+    expect(text).toContain('# Hello');
   });
 });
