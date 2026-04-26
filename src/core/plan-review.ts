@@ -77,8 +77,44 @@ export function renderPlanReview(plan: ChangePlan, opts: RenderOptions): RenderR
     case 'json':
       return { format: 'json', json: review };
     case 'markdown':
+      return { format: 'markdown', text: renderMarkdown(plan, review, opts) };
     case 'html':
     case 'ansi':
       throw new Error(`format ${opts.format} not implemented yet (Tasks 2-4)`);
   }
+}
+
+function renderMarkdown(_plan: ChangePlan, review: PlanReview, opts: RenderOptions): string {
+  const previewN = opts.maxOpBodyLines ?? 40;
+  const lines: string[] = [];
+
+  lines.push('# Hearth ChangePlan', '');
+  lines.push(`\`${review.change_id}\``, '');
+  lines.push('| risk | review | ops | created |');
+  lines.push('| ---- | ------ | --- | ------- |');
+  lines.push(`| ${review.risk} | ${review.requires_review ? 'yes' : 'no'} | ${review.ops.length} | ${review.created_at.replace('T', ' ').slice(0, 16)} |`);
+  lines.push('');
+  if (review.note) lines.push(`> ${review.note}`, '');
+
+  lines.push('## Operations', '');
+  for (let i = 0; i < review.ops.length; i++) {
+    const op = review.ops[i]!;
+    lines.push(`### ${i + 1}. \`${op.kind}\` → \`${op.path}\``, '');
+    lines.push(`reason: ${op.reason}`, '');
+    if (op.must_exist) {
+      lines.push(`precondition: file must exist; base hash \`${op.base_hash?.slice(0, 16) ?? '–'}…\``, '');
+    } else {
+      lines.push('precondition: file must NOT already exist (create-only)', '');
+    }
+    if (op.after !== null) {
+      const bodyLines = op.after.split('\n');
+      const shown = bodyLines.slice(0, previewN);
+      const more = Math.max(0, bodyLines.length - previewN);
+      lines.push('```markdown');
+      lines.push(...shown);
+      if (more > 0) lines.push(`… (+${more} more lines)`);
+      lines.push('```', '');
+    }
+  }
+  return lines.join('\n').trimEnd();
 }

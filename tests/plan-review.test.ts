@@ -54,9 +54,32 @@ describe('renderPlanReview JSON', () => {
   });
 });
 
+describe('renderPlanReview markdown', () => {
+  it('produces a self-contained markdown document', () => {
+    const out = renderPlanReview(PLAN, { format: 'markdown' });
+    expect(out.format).toBe('markdown');
+    if (out.format !== 'markdown') throw new Error('narrow');
+    const md = out.text;
+    expect(md).toContain('cp-001');
+    expect(md).toContain('medium');
+    expect(md).toContain('06 Hearth Inbox/note.md');
+    expect(md).toContain('new capture');
+    // Body preview is rendered in a fenced code block
+    expect(md).toMatch(/```/);
+    expect(md).toContain('# Hello');
+  });
+
+  it('omits the celebratory footer (aesthetic restraint — no v0.3.1 advert)', () => {
+    const out = renderPlanReview(PLAN, { format: 'markdown' });
+    if (out.format !== 'markdown') throw new Error('narrow');
+    const md = out.text;
+    expect(md).not.toMatch(/v0\.3\.1/);
+    expect(md).not.toMatch(/🔥|📋|✅|❌/); // no emoji decoration
+  });
+});
+
 describe('renderPlanReview unimplemented formats', () => {
-  it('throws for markdown / html / ansi (Tasks 2-4 land each format)', () => {
-    expect(() => renderPlanReview(PLAN, { format: 'markdown' })).toThrow(/not implemented/);
+  it('throws for html / ansi (Tasks 3-4 land each format)', () => {
     expect(() => renderPlanReview(PLAN, { format: 'html' })).toThrow(/not implemented/);
     expect(() => renderPlanReview(PLAN, { format: 'ansi' })).toThrow(/not implemented/);
   });

@@ -18,6 +18,7 @@ import { sha256 } from './core/hash.ts';
 import { loadSchema, SchemaError } from './core/schema.ts';
 import { PendingStore } from './core/pending-store.ts';
 import { validateChangePlan, PlanValidationError } from './core/plan-validator.ts';
+import { renderPlanReview } from './core/plan-review.ts';
 import { MockAgentAdapter } from './ingest/mock-adapter.ts';
 import { ClaudeAgentAdapter } from './ingest/claude-adapter.ts';
 import { createKernel } from './core/vault-kernel.ts';
@@ -340,16 +341,15 @@ export function showPending(changeId: string, opts: PendingShowOptions = {}): Pe
 
 // ── markdown rendering for share-page surfaces ─────────────────────────
 //
-// Channel adapters that have a "publish a webpage" capability (wechat-cc
-// share_page, telegram inline html, future Local Console) want a fuller
-// rendering than the chat-line summary produced by listPending/showPending.
-// renderPlanMarkdown produces a self-contained markdown document so the
-// channel can hand it straight to its publisher.
+// Channel adapters (wechat-cc share_page, telegram inline html, future
+// Local Console) want a self-contained markdown document. We delegate to
+// the canonical renderPlanReview layer so all surfaces (CLI / HTTP /
+// channel) render from the same place.
 
 export interface RenderPlanOptions {
   hearthStateDir?: string;
   /** How many body-preview lines to include per op. Default 40. */
-  previewLines?: number;
+  maxOpBodyLines?: number;
   /** Suffix line at the bottom (e.g. "Reply `/hearth apply <id>` to commit."). */
   applyHint?: string;
 }
@@ -372,52 +372,20 @@ export function renderPlanMarkdown(changeId: string, opts: RenderPlanOptions = {
   catch (e) {
     return { ok: false, markdown: `# Plan not found\n\n\`${changeId}\` is no longer pending.`, error: (e as Error).message };
   }
-  const previewN = opts.previewLines ?? 40;
-  const lines: string[] = [];
-
-  lines.push(`# Hearth ChangePlan`, '');
-  lines.push(`**\`${plan.change_id}\`**`, '');
-  lines.push(`| risk | review | ops | created |`);
-  lines.push(`| ---- | ------ | --- | ------- |`);
-  lines.push(`| ${plan.risk} | ${plan.requires_review ? 'yes' : 'no'} | ${plan.ops.length} | ${plan.created_at.replace('T', ' ').slice(0, 16)} |`);
-  lines.push('');
-  if (plan.note) {
-    lines.push(`> ${plan.note}`, '');
-  }
-
-  lines.push(`## Operations`, '');
-  for (let i = 0; i < plan.ops.length; i++) {
-    const op = plan.ops[i]!;
-    lines.push(`### ${i + 1}. \`${op.op}\` → \`${op.path}\``, '');
-    lines.push(`**reason**: ${op.reason}`, '');
-    if (op.precondition.exists) {
-      lines.push(`*precondition*: file must exist; base hash \`${op.precondition.base_hash?.slice(0, 16) ?? '–'}…\``, '');
-    } else {
-      lines.push(`*precondition*: file must NOT already exist (create-only)`, '');
-    }
-    if (op.body_preview) {
-      const previewText = op.body_preview.split('\n').slice(0, previewN).join('\n');
-      const moreLines = Math.max(0, op.body_preview.split('\n').length - previewN);
-      lines.push('```markdown');
-      lines.push(previewText);
-      if (moreLines > 0) lines.push(`… (+${moreLines} more lines)`);
-      lines.push('```', '');
-    }
-  }
-
-  lines.push(`---`, '');
+  const out = renderPlanReview(plan, { format: 'markdown', maxOpBodyLines: opts.maxOpBodyLines });
+  if (out.format !== 'markdown') throw new Error('renderPlanReview did not return markdown');
+  let markdown = out.text;
+  markdown += '\n\n---\n\n';
   if (opts.applyHint) {
-    lines.push(opts.applyHint);
+    markdown += opts.applyHint;
   } else {
-    lines.push(`To commit, reply: \`/hearth apply ${plan.change_id}\``);
+    markdown += `To commit, reply: \`/hearth apply ${plan.change_id}\``;
   }
-  lines.push('', `*Hearth v0.3.1 channel review surface. The vault has not been modified — this plan is queued for your approval.*`);
-
   return {
     ok: true,
     change_id: plan.change_id,
     title: `Hearth · ${plan.ops.length}-op ChangePlan (${plan.risk})`,
-    markdown: lines.join('\n'),
+    markdown,
   };
 }
 
