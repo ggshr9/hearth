@@ -22,6 +22,8 @@ import { lint } from '../core/lint.ts';
 import { ingestFromChannel } from '../runtime.ts';
 import { buildProposal, applyProposal, renderProposalSummary } from './adopt.ts';
 import { runDoctor, renderDoctorReport } from './doctor.ts';
+import { startReviewServer } from '../review-server.ts';
+import { TunnelManager } from '../tunnel-manager.ts';
 import { startStdioServer } from '../mcp-server.ts';
 import { audit, readAudit, parseSince } from '../core/audit.ts';
 import { issueToken } from '../core/approval-token.ts';
@@ -366,6 +368,35 @@ async function cmdSetup(_positionals: string[], _values: Record<string, string |
   process.exit(code);
 }
 
+async function cmdReview(positionals: string[], values: Record<string, string | boolean | undefined>): Promise<void> {
+  const sub = positionals[0];
+  if (sub !== 'start') fail(`review: unknown subcommand "${sub}". expected: start`);
+  const vault = resolve((values.vault as string) ?? process.cwd());
+  const stateDir = (values['state-dir'] as string) ?? undefined;
+
+  const server = startReviewServer({ port: 0, vaultRoot: vault, hearthStateDir: stateDir });
+  const mgr = new TunnelManager({
+    binary: process.env.HEARTH_TUNNEL_BINARY,    // test seam
+    localPort: server.port,
+    idleCloseMs: 10 * 60_000,
+  });
+  try {
+    const url = await mgr.ensureUrl();
+    process.stdout.write(`${url}\n`);
+    process.stdout.write(`local server: http://127.0.0.1:${server.port}\n`);
+    process.stdout.write(`vault: ${vault}\n`);
+    process.stdout.write(`stop with Ctrl-C\n`);
+    // Keep alive until SIGINT
+    await new Promise<void>(r => {
+      process.on('SIGINT', () => r());
+      process.on('SIGTERM', () => r());
+    });
+  } finally {
+    await mgr.close();
+    server.stop();
+  }
+}
+
 function help(): void {
   process.stdout.write(`hearth v0.1.0-alpha
 
@@ -390,7 +421,7 @@ See docs/SPEC.md and docs/ROADMAP.md.
 `);
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const args = process.argv.slice(2);
   if (args.length === 0 || args[0] === '-h' || args[0] === '--help') { help(); return; }
   const cmd = args[0];
@@ -411,25 +442,27 @@ function main(): void {
       yes: { type: 'boolean' },
       since: { type: 'string' },
       limit: { type: 'string' },
+      'state-dir': { type: 'string' },
     },
     allowPositionals: true,
     strict: false,
   });
   switch (cmd) {
     case 'init': return cmdInit(positionals, values);
-    case 'ingest': void cmdIngest(positionals, values); return;
+    case 'ingest': return await cmdIngest(positionals, values);
     case 'pending': return cmdPending(positionals, values);
     case 'query': return cmdQuery(positionals, values);
     case 'lint': return cmdLint(positionals, values);
-    case 'channel': void cmdChannel(positionals, values); return;
+    case 'channel': return await cmdChannel(positionals, values);
     case 'adopt': return cmdAdopt(positionals, values);
     case 'doctor': return cmdDoctor(positionals, values);
-    case 'mcp': void cmdMcp(positionals, values); return;
+    case 'mcp': return await cmdMcp(positionals, values);
     case 'log': return cmdLog(positionals, values);
-    case 'setup': void cmdSetup(positionals, values); return;
+    case 'review': return await cmdReview(positionals, values);
+    case 'setup': return await cmdSetup(positionals, values);
     case 'help': return help();
     default: fail(`unknown command: ${cmd}. run "hearth help"`);
   }
 }
 
-main();
+await main();
