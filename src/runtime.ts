@@ -20,6 +20,8 @@ import { PendingStore } from './core/pending-store.ts';
 import { validateChangePlan, PlanValidationError } from './core/plan-validator.ts';
 import { MockAgentAdapter } from './ingest/mock-adapter.ts';
 import { ClaudeAgentAdapter } from './ingest/claude-adapter.ts';
+import { createKernel } from './core/vault-kernel.ts';
+import { audit } from './core/audit.ts';
 import type { AgentAdapter } from './core/agent-adapter.ts';
 import type { ChangePlan } from './core/types.ts';
 
@@ -195,4 +197,174 @@ export async function ingestFromChannel(
     source_path: sourcePath,
     summary,
   };
+}
+
+// ── v0.3.1 channel-side review surface ────────────────────────────────────
+//
+// Channel adapters (wechat-cc, telegram-cc, ...) need to surface the pending
+// queue, render a single ChangePlan, and apply it. Owner authentication is
+// the channel adapter's responsibility (e.g. wechat-cc allowlist); hearth
+// here trusts its caller. Direct apply is a "human-direct" path per SPEC §11
+// — no token needed, the channel ownership IS the authentication.
+//
+// All three return chat-friendly strings already; the channel just forwards
+// them. Errors come back as { ok: false, summary } so the channel can echo
+// the same way it echoes successes.
+
+export interface PendingListOptions {
+  hearthStateDir?: string;
+  /** Cap displayed entries; oldest dropped. Default 10. */
+  limit?: number;
+}
+
+export interface PendingListItem {
+  change_id: string;
+  risk: 'low' | 'medium' | 'high';
+  op_count: number;
+  created_at: string;
+  requires_review: boolean;
+}
+
+export interface PendingListResult {
+  items: PendingListItem[];
+  /** Pre-rendered, ready to send back through the channel. */
+  rendered: string;
+}
+
+export function listPending(opts: PendingListOptions = {}): PendingListResult {
+  const stateDir = opts.hearthStateDir ?? defaultStateDir();
+  const store = new PendingStore(join(stateDir, 'pending'));
+  const plans = store.list();
+  const limit = opts.limit ?? 10;
+  const shown = plans.slice(-limit).reverse();
+  const items: PendingListItem[] = shown.map(p => ({
+    change_id: p.change_id,
+    risk: p.risk,
+    op_count: p.ops.length,
+    created_at: p.created_at,
+    requires_review: p.requires_review,
+  }));
+
+  if (plans.length === 0) {
+    return { items, rendered: '(no pending plans)' };
+  }
+  const lines = [`📋 pending (${plans.length}${plans.length > limit ? `, latest ${limit}` : ''})`, ''];
+  for (const p of shown) {
+    const review = p.requires_review ? '👁' : ' ';
+    lines.push(`${review} ${p.change_id}  ${p.risk.padEnd(6)}  ${p.ops.length}op  ${p.created_at.slice(0, 16)}`);
+  }
+  if (plans.length > limit) lines.push('', `…${plans.length - limit} older not shown`);
+  return { items, rendered: lines.join('\n') };
+}
+
+export interface PendingShowOptions {
+  hearthStateDir?: string;
+  /** Cap each op's body preview lines. Default 6. */
+  previewLines?: number;
+}
+
+export interface PendingShowResult {
+  ok: boolean;
+  change_id?: string;
+  /** Pre-rendered, ready to send back through the channel. */
+  rendered: string;
+  error?: string;
+}
+
+export function showPending(changeId: string, opts: PendingShowOptions = {}): PendingShowResult {
+  const stateDir = opts.hearthStateDir ?? defaultStateDir();
+  const store = new PendingStore(join(stateDir, 'pending'));
+  let plan: ChangePlan;
+  try {
+    plan = store.load(changeId);
+  } catch (e) {
+    return { ok: false, rendered: `❌ pending plan not found: ${changeId}`, error: (e as Error).message };
+  }
+  const previewN = opts.previewLines ?? 6;
+  const lines: string[] = [
+    `🔥 ${plan.change_id}`,
+    `risk: ${plan.risk}    review: ${plan.requires_review}    ops: ${plan.ops.length}`,
+    `created: ${plan.created_at}`,
+  ];
+  if (plan.note) lines.push(`note: ${plan.note}`);
+  lines.push('');
+  for (const op of plan.ops) {
+    lines.push(`[${op.op}] ${op.path}`);
+    lines.push(`  reason: ${op.reason}`);
+    if (op.body_preview) {
+      const preview = op.body_preview.split('\n').slice(0, previewN).join('\n  ');
+      lines.push('  preview:', '  ' + preview);
+    }
+  }
+  return { ok: true, change_id: plan.change_id, rendered: lines.join('\n') };
+}
+
+export interface ApplyForOwnerOptions {
+  vaultRoot: string;
+  hearthStateDir?: string;
+  /** Identity string for audit log (e.g. wechat user_id). */
+  ownerId: string;
+  /** Channel name for audit log (e.g. "wechat"). */
+  channel: string;
+}
+
+export interface ApplyForOwnerResult {
+  ok: boolean;
+  change_id: string;
+  /** Pre-rendered, ready to send back through the channel. */
+  rendered: string;
+  ops_applied?: number;
+  error?: string;
+}
+
+export async function applyForOwner(
+  changeId: string,
+  opts: ApplyForOwnerOptions,
+): Promise<ApplyForOwnerResult> {
+  const stateDir = opts.hearthStateDir ?? defaultStateDir();
+  const store = new PendingStore(join(stateDir, 'pending'));
+
+  let schema;
+  try { schema = loadSchema(opts.vaultRoot); }
+  catch (e) {
+    if (e instanceof SchemaError) {
+      return { ok: false, change_id: changeId, rendered: `❌ vault has no SCHEMA.md`, error: e.message };
+    }
+    throw e;
+  }
+
+  let plan: ChangePlan;
+  try { plan = store.load(changeId); }
+  catch (e) {
+    return { ok: false, change_id: changeId, rendered: `❌ pending plan not found: ${changeId}`, error: (e as Error).message };
+  }
+
+  const kernel = createKernel(opts.vaultRoot, schema);
+  const result = kernel.apply(plan);
+
+  if (result.ok) {
+    store.remove(changeId);
+    void audit(opts.vaultRoot, {
+      event: 'changeplan.applied',
+      initiated_by: `channel:${opts.channel}`,
+      data: { change_id: changeId, ops: result.ops.length, owner_id: opts.ownerId },
+    });
+    const lines = [
+      `✅ applied ${changeId}`,
+      `${result.ops.length} op${result.ops.length === 1 ? '' : 's'} written`,
+    ];
+    for (const r of result.ops) lines.push(`  ${r.ok ? '✓' : '✗'} ${r.op} ${r.path}`);
+    return { ok: true, change_id: changeId, ops_applied: result.ops.length, rendered: lines.join('\n') };
+  }
+
+  void audit(opts.vaultRoot, {
+    event: 'changeplan.rejected',
+    initiated_by: `channel:${opts.channel}`,
+    data: { change_id: changeId, error: result.error, owner_id: opts.ownerId },
+  });
+  const lines = [`❌ apply failed: ${changeId}`, result.error ?? '(unknown error)'];
+  for (const r of result.ops) {
+    if (!r.ok) lines.push(`  ✗ ${r.op} ${r.path} — ${r.error ?? ''}`);
+  }
+  return { ok: false, change_id: changeId, rendered: lines.join('\n'), error: result.error };
 }
