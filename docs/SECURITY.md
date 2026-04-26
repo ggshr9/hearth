@@ -106,8 +106,6 @@ The v0.4 MCP server is the externally-reachable face of hearth. It enlarges the 
 
 ---
 
----
-
 ## Reporting a vulnerability
 
 For now, file a private issue at https://github.com/ggshr9/hearth or email the maintainer (in the repo metadata). Once there's a community, we'll have a coordinated disclosure policy.

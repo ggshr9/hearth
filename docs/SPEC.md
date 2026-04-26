@@ -146,15 +146,9 @@ Each channel handles its own session continuity (mapping `chatId` → conversati
 
 ### Vault tool layer (MCP)
 
-`hearth` exposes vault capabilities to the agent as [MCP](https://modelcontextprotocol.io/) servers. The toolset:
+`hearth` exposes vault capabilities as a [MCP](https://modelcontextprotocol.io/) server (stdio transport). The full v0.4 surface — read tools, plan/apply tools (token-gated), resources with drift detection, workflow prompts — is documented in [§10 v0.4 — MCP server surface](#10-v04--mcp-server-surface).
 
-- `vault_search(query)` — ripgrep + frontmatter filter
-- `vault_read(path)` — read a wiki page or source
-- `vault_plan_ingest(source) → ChangePlan` — propose writes for a new source
-- `vault_apply_change(change_id, approved=true) → AppliedResult` — commit a previously-produced plan, gated by user approval
-- `vault_lint(scope?) → LintReport` — run lint, read-only
-
-**`vault_write` is deliberately not exposed.** All wiki mutations flow through plan + apply. The vault kernel — not the agent — enforces SCHEMA.md permissions on apply.
+**`vault_write` / `vault_delete` / `vault_patch_anywhere` are deliberately never exposed.** All wiki mutations flow through plan + apply, with the vault kernel — not the agent — enforcing SCHEMA.md permissions on apply.
 
 ---
 

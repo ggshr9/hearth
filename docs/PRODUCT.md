@@ -209,23 +209,21 @@ generic `read/write/append/delete/patch` API — that would defeat governance.
 The hearth MCP server exposes **governed tools**:
 
 ```
-vault_search
-vault_read
-vault_plan_ingest
-vault_plan_update
-vault_pending_list
-vault_pending_show
-vault_lint
-vault_doctor
+Read tools (no mutation):
+  vault_search          ripgrep + frontmatter filter
+  vault_read            single page or source
+  vault_query           citation-grounded answer; returns NO_ANSWER if ungrounded
+  vault_lint            read-only audit
+  vault_doctor          health check
+  vault_pending_list    queue listing
+  vault_pending_show    diff for one pending change
+
+Mutation tools (planned writes, gated):
+  vault_plan_ingest     returns ChangePlan; vault still untouched
+  vault_apply_change    token-gated; without token returns REQUIRES_HUMAN_APPROVAL
 ```
 
-Carefully gated:
-
-```
-vault_apply_change    # only with --allow-apply or low-risk-only policy
-```
-
-Never exposed:
+Never exposed (deliberately, ever):
 
 ```
 vault_write           # would bypass ChangePlan
@@ -236,24 +234,23 @@ vault_patch_anywhere  # would bypass permission table
 **Plus resources and prompts** (this is what makes hearth "agent-native",
 not just "tool collection"):
 
-Resources:
+Resources (each carries `version_hash` / `last_modified` for drift detection):
 
 ```
-hearth://schema
-hearth://vault-map
-hearth://pending
-hearth://lint-report
-hearth://agent-instructions
+hearth://schema                SCHEMA.md
+hearth://vault-map             directory tree summary
+hearth://pending               queue
+hearth://lint-report           latest lint output
+hearth://agent-instructions    rules pack the consuming agent prepends to its system prompt
 ```
 
-Prompts:
+Prompts (workflow templates):
 
 ```
-hearth_ingest_workflow
-hearth_query_with_citations
-hearth_backfill_workflow
-hearth_restructure_discussion
-hearth_lint_fix_workflow
+ingest_workflow
+query_with_citations
+lint_fix_workflow
+restructure_discussion
 ```
 
 The agent instruction pack tells any consuming agent the rules:
