@@ -348,7 +348,7 @@ export function showPending(changeId: string, opts: PendingShowOptions = {}): Pe
 
 export interface RenderPlanOptions {
   hearthStateDir?: string;
-  /** How many body-preview lines to include per op. Default 40. */
+  /** How many body-preview lines to include per op. Default: see DEFAULT_OP_BODY_LINES in core/plan-review.ts. */
   maxOpBodyLines?: number;
   /** Suffix line at the bottom (e.g. "Reply `/hearth apply <id>` to commit."). */
   applyHint?: string;
@@ -373,8 +373,16 @@ export function renderPlanMarkdown(changeId: string, opts: RenderPlanOptions = {
     return { ok: false, markdown: `# Plan not found\n\n\`${changeId}\` is no longer pending.`, error: (e as Error).message };
   }
   const out = renderPlanReview(plan, { format: 'markdown', maxOpBodyLines: opts.maxOpBodyLines });
+  // TypeScript cannot narrow the union through the function boundary;
+  // this guard turns out.text from string|undefined into string without
+  // a non-null assertion. The throw path is structurally unreachable.
   if (out.format !== 'markdown') throw new Error('renderPlanReview did not return markdown');
   let markdown = out.text;
+  // Footer is always appended (separator + apply-hint line) — keeps the
+  // original renderPlanMarkdown contract that channel publishers like
+  // wechat-cc expect. Callers wanting a footer-free document can pass
+  // applyHint: '' (empty string still triggers the separator) — that
+  // edge case is acknowledged but not currently exercised.
   markdown += '\n\n---\n\n';
   if (opts.applyHint) {
     markdown += opts.applyHint;

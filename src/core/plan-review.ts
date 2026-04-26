@@ -6,6 +6,9 @@
 
 import type { ChangePlan, ChangeOpKind, Risk } from './types.ts';
 
+/** Default cap on body-preview lines per op for size-bounded surfaces. */
+const DEFAULT_OP_BODY_LINES = 40;
+
 export interface PlanReviewOp {
   kind: ChangeOpKind;
   path: string;
@@ -85,7 +88,7 @@ export function renderPlanReview(plan: ChangePlan, opts: RenderOptions): RenderR
 }
 
 function renderMarkdown(_plan: ChangePlan, review: PlanReview, opts: RenderOptions): string {
-  const previewN = opts.maxOpBodyLines ?? 40;
+  const previewN = opts.maxOpBodyLines ?? DEFAULT_OP_BODY_LINES;
   const lines: string[] = [];
 
   lines.push('# Hearth ChangePlan', '');
