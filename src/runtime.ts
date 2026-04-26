@@ -223,12 +223,46 @@ export interface PendingListItem {
   op_count: number;
   created_at: string;
   requires_review: boolean;
+  /** First op's target path — gives the user a "going to X" anchor. */
+  primary_path: string;
+  /** Short human-readable preview of what the plan is about. */
+  preview: string;
 }
 
 export interface PendingListResult {
   items: PendingListItem[];
   /** Pre-rendered, ready to send back through the channel. */
   rendered: string;
+}
+
+/** Best-effort one-liner: try the agent's note, then first op's body
+ *  preview first non-frontmatter line, then first op's reason. Trim hard. */
+function summarizePlan(plan: ChangePlan): string {
+  const stripBody = (s: string): string => {
+    const lines = s.split('\n');
+    let i = 0;
+    if (lines[0]?.trim() === '---') {
+      i = 1;
+      while (i < lines.length && lines[i]?.trim() !== '---') i++;
+      i++; // skip closing fence
+    }
+    while (i < lines.length && (lines[i]?.trim() === '' || lines[i]?.trim().startsWith('#'))) i++;
+    return (lines[i] ?? '').trim();
+  };
+
+  const op0 = plan.ops[0];
+  const candidates: string[] = [];
+  // body_preview reflects the actual source content the user submitted —
+  // most informative for "what is this plan about". note (agent's free
+  // commentary) and reason fall back behind it.
+  if (op0?.body_preview) candidates.push(stripBody(op0.body_preview));
+  if (plan.note) candidates.push(plan.note);
+  if (op0?.reason) candidates.push(op0.reason);
+  for (const c of candidates) {
+    const t = c.replace(/\s+/g, ' ').trim();
+    if (t.length > 0) return t.length > 80 ? t.slice(0, 77) + '…' : t;
+  }
+  return '(no preview)';
 }
 
 export function listPending(opts: PendingListOptions = {}): PendingListResult {
@@ -243,18 +277,23 @@ export function listPending(opts: PendingListOptions = {}): PendingListResult {
     op_count: p.ops.length,
     created_at: p.created_at,
     requires_review: p.requires_review,
+    primary_path: p.ops[0]?.path ?? '(no ops)',
+    preview: summarizePlan(p),
   }));
 
   if (plans.length === 0) {
     return { items, rendered: '(no pending plans)' };
   }
   const lines = [`📋 pending (${plans.length}${plans.length > limit ? `, latest ${limit}` : ''})`, ''];
-  for (const p of shown) {
-    const review = p.requires_review ? '👁' : ' ';
-    lines.push(`${review} ${p.change_id}  ${p.risk.padEnd(6)}  ${p.ops.length}op  ${p.created_at.slice(0, 16)}`);
+  for (const it of items) {
+    const review = it.requires_review ? '👁' : ' ';
+    lines.push(`${review} ${it.change_id}  ${it.risk}  ${it.op_count}op  ${it.created_at.slice(11, 16)}`);
+    lines.push(`  → ${it.primary_path}`);
+    lines.push(`  ${it.preview}`);
+    lines.push('');
   }
-  if (plans.length > limit) lines.push('', `…${plans.length - limit} older not shown`);
-  return { items, rendered: lines.join('\n') };
+  if (plans.length > limit) lines.push(`…${plans.length - limit} older not shown`);
+  return { items, rendered: lines.join('\n').trimEnd() };
 }
 
 export interface PendingShowOptions {

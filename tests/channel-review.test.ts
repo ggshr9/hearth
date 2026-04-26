@@ -67,11 +67,11 @@ describe('v0.3.1 channel review: list / show / apply', () => {
   it('listPending: returns the latest plans newest-first, capped by limit', async () => {
     const vault = makeVault();
     const stateDir = makeStateDir();
-    const id1 = await ingestOne(vault, stateDir, 'msg-1', '# Note one\n\nfirst body');
+    const id1 = await ingestOne(vault, stateDir, 'msg-1', '# Note one\n\nfirst body line');
     await new Promise(r => setTimeout(r, 5)); // distinct timestamps
-    const id2 = await ingestOne(vault, stateDir, 'msg-2', '# Note two\n\nsecond body');
+    const id2 = await ingestOne(vault, stateDir, 'msg-2', '# Note two\n\nsecond body line');
     await new Promise(r => setTimeout(r, 5));
-    const id3 = await ingestOne(vault, stateDir, 'msg-3', '# Note three\n\nthird body');
+    const id3 = await ingestOne(vault, stateDir, 'msg-3', '# Note three\n\nthird body line');
 
     const r = listPending({ hearthStateDir: stateDir, limit: 2 });
     expect(r.items.length).toBe(2);
@@ -82,6 +82,12 @@ describe('v0.3.1 channel review: list / show / apply', () => {
     expect(r.rendered).toContain(id3);
     expect(r.rendered).not.toContain(id1);
     expect(r.rendered).toContain('…1 older not shown');
+    // Each entry now includes a path arrow + preview line so the user can
+    // tell what the plan is about, not just an opaque change_id.
+    expect(r.items[0]!.primary_path).toBeTruthy();
+    expect(r.items[0]!.preview).toBeTruthy();
+    expect(r.rendered).toContain('→ ');
+    expect(r.rendered).toMatch(/third body line/);
   });
 
   it('showPending: renders ops + reasons + body preview for one plan', async () => {
