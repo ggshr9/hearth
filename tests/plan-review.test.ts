@@ -78,9 +78,65 @@ describe('renderPlanReview markdown', () => {
   });
 });
 
+describe('renderPlanReview html', () => {
+  it('returns a complete HTML document', () => {
+    const out = renderPlanReview(PLAN, {
+      format: 'html',
+      capabilityBase: 'https://abc-1.trycloudflare.com',
+      capabilityToken: 'tok-xyz',
+    });
+    expect(out.format).toBe('html');
+    if (out.format !== 'html') throw new Error('narrow');
+    const html = out.html;
+    expect(html.startsWith('<!doctype html>')).toBe(true);
+    expect(html).toContain('<title>');
+    expect(html).toContain('cp-001');
+    expect(html).toContain('06 Hearth Inbox/note.md');
+  });
+
+  it('honors aesthetic restraint (no shadows / gradients / emoji / external assets)', () => {
+    const out = renderPlanReview(PLAN, {
+      format: 'html',
+      capabilityBase: 'https://abc-1.trycloudflare.com',
+      capabilityToken: 'tok-xyz',
+    });
+    if (out.format !== 'html') throw new Error('narrow');
+    const html = out.html;
+    expect(html).not.toMatch(/box-shadow|drop-shadow/);
+    expect(html).not.toMatch(/linear-gradient|radial-gradient/);
+    expect(html).not.toMatch(/🎉|✅|❌|🔥|📋/);
+    // No external script or stylesheet refs
+    expect(html).not.toMatch(/<link[^>]+href=/);
+    expect(html).not.toMatch(/<script[^>]+src=/);
+  });
+
+  it('renders approve and reject form actions bound to the capability URL', () => {
+    const out = renderPlanReview(PLAN, {
+      format: 'html',
+      capabilityBase: 'https://abc-1.trycloudflare.com',
+      capabilityToken: 'tok-xyz',
+    });
+    if (out.format !== 'html') throw new Error('narrow');
+    const html = out.html;
+    expect(html).toContain('action="/p/cp-001/apply?t=tok-xyz"');
+    expect(html).toContain('action="/p/cp-001/reject?t=tok-xyz"');
+    expect(html).toContain('method="post"');
+  });
+
+  it('renders the proposed body inside <pre> for create ops', () => {
+    const out = renderPlanReview(PLAN, {
+      format: 'html',
+      capabilityBase: 'https://abc-1.trycloudflare.com',
+      capabilityToken: 'tok-xyz',
+    });
+    if (out.format !== 'html') throw new Error('narrow');
+    const html = out.html;
+    expect(html).toMatch(/<pre[^>]*>[\s\S]*# Hello[\s\S]*<\/pre>/);
+  });
+});
+
 describe('renderPlanReview unimplemented formats', () => {
-  it('throws for html / ansi (Tasks 3-4 land each format)', () => {
-    expect(() => renderPlanReview(PLAN, { format: 'html' })).toThrow(/not implemented/);
+  it('throws for ansi (Task 4 lands the ansi format)', () => {
     expect(() => renderPlanReview(PLAN, { format: 'ansi' })).toThrow(/not implemented/);
   });
 });

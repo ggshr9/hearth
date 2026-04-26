@@ -82,8 +82,9 @@ export function renderPlanReview(plan: ChangePlan, opts: RenderOptions): RenderR
     case 'markdown':
       return { format: 'markdown', text: renderMarkdown(plan, review, opts) };
     case 'html':
+      return { format: 'html', html: renderHtml(plan, review, opts) };
     case 'ansi':
-      throw new Error(`format ${opts.format} not implemented yet (Tasks 2-4)`);
+      throw new Error(`format ${opts.format} not implemented yet (Task 4)`);
   }
 }
 
@@ -120,4 +121,118 @@ function renderMarkdown(_plan: ChangePlan, review: PlanReview, opts: RenderOptio
     }
   }
   return lines.join('\n').trimEnd();
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderHtml(_plan: ChangePlan, review: PlanReview, opts: RenderOptions): string {
+  const t = opts.capabilityToken ?? '';
+  const id = encodeURIComponent(review.change_id);
+  const tEnc = encodeURIComponent(t);
+  const applyAction = `/p/${id}/apply?t=${tEnc}`;
+  const rejectAction = `/p/${id}/reject?t=${tEnc}`;
+
+  const opsHtml = review.ops.map((op, i) => {
+    const body = op.after ?? '';
+    return `
+    <section class="op">
+      <h2>${i + 1}. <code>${escapeHtml(op.kind)}</code> → <code>${escapeHtml(op.path)}</code></h2>
+      <p class="reason">${escapeHtml(op.reason)}</p>
+      <p class="meta">${op.must_exist ? `must exist · base hash <code>${escapeHtml(op.base_hash?.slice(0, 16) ?? '')}…</code>` : 'must NOT already exist (create-only)'}</p>
+      ${op.after !== null ? `<pre>${escapeHtml(body)}</pre>` : ''}
+    </section>`;
+  }).join('');
+
+  const noteHtml = review.note ? `<blockquote>${escapeHtml(review.note)}</blockquote>` : '';
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>hearth · ${escapeHtml(review.change_id)}</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    max-width: 720px;
+    margin: 2.5rem auto;
+    padding: 0 1.25rem;
+    line-height: 1.55;
+    color: #1c1c1e;
+    background: #fcfcfc;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e5e5e7; background: #111; }
+    code, pre { background: #1c1c1e; }
+    blockquote { color: #999; }
+  }
+  h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 0.5rem; letter-spacing: -0.01em; }
+  h2 { font-size: 1rem;    font-weight: 600; margin: 1.5rem 0 0.5rem; letter-spacing: -0.005em; }
+  .meta-row { color: #666; font-size: 0.875rem; margin-bottom: 1.5rem; }
+  .meta-row > span + span::before { content: " · "; color: #ccc; }
+  .reason { margin: 0.25rem 0 0.5rem; }
+  .meta   { font-size: 0.8125rem; color: #888; margin: 0.25rem 0 0.75rem; }
+  blockquote { color: #555; margin: 0.75rem 0 1.5rem; padding-left: 0.85rem; border-left: 2px solid #d0d0d0; }
+  code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.875em;
+    background: #f0f0f0;
+    padding: 0 0.2em;
+    border-radius: 2px;
+  }
+  pre {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.8125rem;
+    background: #f5f5f5;
+    padding: 0.75rem 0.85rem;
+    overflow-x: auto;
+    line-height: 1.5;
+    border-radius: 3px;
+    margin: 0.5rem 0 0;
+  }
+  section.op { margin-bottom: 1.5rem; }
+  form.actions { margin: 2rem 0 4rem; display: flex; gap: 0.75rem; }
+  button {
+    font: inherit;
+    padding: 0.5rem 1rem;
+    border: 1px solid #999;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    border-radius: 3px;
+  }
+  button.approve { border-color: #2c7a3a; color: #2c7a3a; }
+  button.reject  { border-color: #999; color: #666; }
+  button:hover { background: rgba(0,0,0,0.04); }
+  @media (prefers-color-scheme: dark) {
+    button:hover { background: rgba(255,255,255,0.06); }
+    button.approve { border-color: #6abc7a; color: #6abc7a; }
+  }
+</style>
+</head>
+<body>
+  <h1>hearth · <code>${escapeHtml(review.change_id)}</code></h1>
+  <div class="meta-row">
+    <span>risk: ${escapeHtml(review.risk)}</span>
+    <span>${review.ops.length} op${review.ops.length === 1 ? '' : 's'}</span>
+    <span>${escapeHtml(review.created_at.replace('T', ' ').slice(0, 16))}</span>
+  </div>
+  ${noteHtml}
+  ${opsHtml}
+  <form class="actions" method="post" action="${applyAction}">
+    <button type="submit" class="approve">approve</button>
+  </form>
+  <form class="actions" method="post" action="${rejectAction}" style="margin-top: -3.5rem;">
+    <button type="submit" class="reject">reject</button>
+  </form>
+</body>
+</html>`;
 }
