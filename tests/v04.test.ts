@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { audit, readAudit, parseSince } from '../src/core/audit.ts';
-import { issueToken, verifyAndConsume, TokenError } from '../src/core/approval-token.ts';
+import { issueToken, verifyAndConsume, verifyToken, TokenError } from '../src/core/approval-token.ts';
 import { schemaVersionHash, schemaLastModified } from '../src/core/schema.ts';
 
 const SCHEMA = `---
@@ -105,6 +105,31 @@ describe('approval token: issue + verify + single-use + expiry', () => {
     // Flip a byte in the sig
     const badSig = sig!.slice(0, -1) + (sig!.slice(-1) === 'A' ? 'B' : 'A');
     expect(() => verifyAndConsume({ token: `${payload}.${badSig}`, change_id: 'cp-6', required_scope: 'low' })).toThrow(/invalid_sig/);
+  });
+});
+
+describe('approval token: verify without consume', () => {
+  it('verifyToken returns payload without marking consumed', async () => {
+    const { verifyToken } = await import('../src/core/approval-token.ts');
+    const { token } = issueToken({ change_id: 'cp-vw', issued_by: 'test' });
+    // verify, twice — should not be consumed by either
+    const p1 = verifyToken({ token, change_id: 'cp-vw', required_scope: 'low' });
+    expect(p1.change_id).toBe('cp-vw');
+    const p2 = verifyToken({ token, change_id: 'cp-vw', required_scope: 'low' });
+    expect(p2.jti).toBe(p1.jti);
+    // Now consume — first time succeeds
+    verifyAndConsume({ token, change_id: 'cp-vw', required_scope: 'low' });
+    // After consume, both verifyToken AND verifyAndConsume reject
+    expect(() => verifyToken({ token, change_id: 'cp-vw', required_scope: 'low' })).toThrow();
+    expect(() => verifyAndConsume({ token, change_id: 'cp-vw', required_scope: 'low' })).toThrow();
+  });
+
+  it('verifyToken still rejects expired / wrong change_id', async () => {
+    const { verifyToken } = await import('../src/core/approval-token.ts');
+    const { token } = issueToken({ change_id: 'cp-vw2', issued_by: 'test', expires_in_ms: -1 });
+    expect(() => verifyToken({ token, change_id: 'cp-vw2', required_scope: 'low' })).toThrow(); // expired
+    const { token: t2 } = issueToken({ change_id: 'cp-other', issued_by: 'test' });
+    expect(() => verifyToken({ token: t2, change_id: 'cp-vw2', required_scope: 'low' })).toThrow(); // wrong change_id
   });
 });
 

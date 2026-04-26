@@ -106,11 +106,30 @@ function markConsumed(jti: string): void {
   appendFileSync(CONSUMED_PATH, `${jti} ${new Date().toISOString()}\n`, { mode: 0o600 });
 }
 
+/** Verify validity without consuming. Throws TokenError on any failure. */
+export function verifyToken(args: {
+  token: string;
+  change_id: string;
+  required_scope: Risk;
+}): TokenPayload {
+  return verifyCore(args);
+}
+
 /**
  * Verify a token for a given change_id and required risk. Throws TokenError
  * with a precise reason. On success, marks the token consumed (single-use).
  */
 export function verifyAndConsume(args: {
+  token: string;
+  change_id: string;
+  required_scope: Risk;
+}): TokenPayload {
+  const payload = verifyCore(args);
+  markConsumed(payload.jti);
+  return payload;
+}
+
+function verifyCore(args: {
   token: string;
   change_id: string;
   required_scope: Risk;
@@ -147,7 +166,6 @@ export function verifyAndConsume(args: {
 
   // Single-use
   if (isConsumed(payload.jti)) throw new TokenError('consumed');
-  markConsumed(payload.jti);
 
   return payload;
 }
