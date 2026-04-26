@@ -83,12 +83,28 @@ The default for everything is "queue, don't auto-apply". Users opt down from the
 
 ---
 
-## 7. Things hearth will not do, ever
+## 7. v0.4 mechanisms — approval token + MCP surface guards
+
+The v0.4 MCP server is the externally-reachable face of hearth. It enlarges the threat surface (any MCP-aware agent can call hearth tools), so v0.4 adds two enforcement mechanisms on top of the kernel:
+
+**Approval token (HMAC-SHA256, single-use).** `vault_apply_change` requires a token bound to the specific `change_id` and scoped no broader than the human's authorization. Tokens are short-lived (5-min default expiry), single-use (`jti` recorded in `~/.hearth/consumed-tokens.log` and constant-time compared), and signed with a secret in `~/.hearth/secret.key` (mode 0600, generated on first use). An apply call without a valid token returns `REQUIRES_HUMAN_APPROVAL` — no opt-out, no "trusted bypass". This means even if a malicious or confused agent obtains tool access, it cannot commit to the vault without a token issued by a human-driven path (CLI, console).
+
+**MCP surface is governed-tools-only.** The MCP server never exposes raw `vault_write` / `vault_delete` / `vault_patch_anywhere`. The only mutation tools are `vault_plan_ingest` (returns a ChangePlan, no writes) and `vault_apply_change` (token-gated). Read tools (`vault_search`, `vault_read`, `pending_list`, `pending_show`, `lint`, `doctor`, `query`) cannot mutate. The agent-instruction-pack at `hearth://agent-instructions` is auto-prepended to consuming agents' system prompts — it states the rules in the agent's own context window, but is enforcement *advice* on top of *kernel + token enforcement*.
+
+**Audit log is append-only and file-locked.** Every plan/apply/reject/error event is appended to `<vault>/.hearth/audit.jsonl` with a file lock around writes. `hearth log` renders it human-readable. The audit log is the ground truth for "who did what, when, with which token" — useful for incident response and for catching agent loops that quietly try to apply without approval.
+
+**Error contract for agents.** When the kernel rejects an action it returns a structured error code (`STALE_CONTEXT` / `REQUIRES_HUMAN_APPROVAL` / `REBASE_REQUIRED` / `STALE_TOKEN` / `PERMISSION_DENIED` / `PLAN_VALIDATION_FAILED`) — never just a 500. Agents are instructed (via the instruction pack) to re-read state and retry with corrected context, *not* to escalate privileges or invent workarounds.
+
+---
+
+## 8. Things hearth will not do, ever
 
 - Execute code from the vault (e.g. running a `.sh` file just because it was ingested)
 - Send vault content to a third party without explicit user consent for that specific destination
 - Maintain a separate "shadow vault" outside the user-controlled directory
 - Phone home for telemetry by default; if telemetry exists at all, it's opt-in and content-free
+
+---
 
 ---
 

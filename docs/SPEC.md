@@ -1,6 +1,6 @@
-# hearth SPEC v0.2.1
+# hearth SPEC v0.4
 
-**Status**: draft, designing in public. This document is the contract; code lands after.
+**Status**: shipped through v0.4 (Agent Interface & Audit). Read [`PRODUCT.md`](./PRODUCT.md) first for the doctrine; this document is the technical contract.
 
 ---
 
@@ -301,10 +301,106 @@ depends on. The thing to prove first is the trust loop. See `docs/ROADMAP.md`.
 
 ---
 
-## 9. Versioning
+## 9. v0.3 — Channel runtime
 
-This is `v0.2.1`. The next iterations are sequenced for trust-closure first, format coverage last. See `docs/ROADMAP.md`.
+`runtime.ts` exposes `ingestFromChannel(InboundMsg, opts) → ChannelIngestResult` so any channel adapter (wechat-cc, telegram-cc, future) routes inbound material into the same kernel pipeline as CLI ingest. Channel-side materialization lands in `~/.hearth/channel-inbox/<channel>/<msg-id>.md`; vault is never written by inbound directly.
+
+```
+InboundMsg { channel, message_id, from, text?, url?, received_at }
+       ↓
+materialize → ~/.hearth/channel-inbox/<channel>/<msg-id>.md
+       ↓
+AgentAdapter (mock | claude) → ChangePlan
+       ↓
+plan-validator (rejects path-escape / permission / patch-type drift)
+       ↓
+PendingStore  (vault still untouched)
+       ↓
+[user reviews via CLI / channel commands]
+       ↓
+kernel.apply  (only the human-direct path actually writes vault)
+```
+
+Companion: `hearth adopt <vault>` and `hearth doctor` for installing hearth into an existing vault without migrating files. See [PRODUCT.md §"Don't migrate, adopt"](./PRODUCT.md).
+
+## 10. v0.4 — MCP server surface
+
+Hearth exposes a stdio MCP server (`hearth mcp serve`) so any MCP-aware agent runtime (Claude Code, Cursor, Codex, Continue.dev) can operate on the vault under the trust mechanisms above. Surface:
+
+**Tools (read)**: `vault_search`, `vault_read`, `vault_query`, `vault_lint`, `vault_doctor`, `vault_pending_list`, `vault_pending_show`.
+
+**Tools (mutation)**:
+- `vault_plan_ingest(source_text, origin?, schema_hash_seen?)` — returns ChangePlan; never writes vault. `STALE_CONTEXT` returned if `schema_hash_seen` mismatches current.
+- `vault_apply_change(change_id, approval_token?)` — token-gated. Without token returns `REQUIRES_HUMAN_APPROVAL` with a CLI hint. With a valid token, kernel preflight + apply.
+
+**Resources** (each carries a `version_hash` / `last_modified` so agents can detect drift):
+- `hearth://schema` — SCHEMA.md content
+- `hearth://vault-map` — directory tree summary
+- `hearth://pending` — current pending queue
+- `hearth://lint-report` — latest lint output
+- `hearth://agent-instructions` — markdown rules pack the consuming agent should prepend to its system prompt
+
+**Prompts** (workflow templates):
+- `ingest_workflow`, `query_with_citations`, `lint_fix_workflow`, `restructure_discussion`
+
+Tools not exposed (deliberately, ever): `vault_write`, `vault_delete`, `vault_patch_anywhere`. All mutations route through plan + apply.
+
+## 11. v0.4 — Approval token protocol
+
+`vault_apply_change` via MCP is gated by an HMAC-signed token issued only by a human-direct surface (CLI, channel adapter, future Local Console). This makes apply NOT a silent agent capability.
+
+```
+agent (via MCP) →  vault_apply_change(change_id)
+                    no token → REQUIRES_HUMAN_APPROVAL + hint:
+                                "hearth pending apply <id>" (CLI)
+                                "/hearth apply <id>" (channel)
+
+human surface →  issueToken({ change_id, scope, expires_in_ms?, issued_by })
+                  HMAC-SHA256(secret, json(payload)); secret in
+                  ~/.hearth/secret.key (chmod 600, lazily generated)
+
+agent →  vault_apply_change(change_id, approval_token)
+          verifyAndConsume:
+            - signature OK (constant-time HMAC compare)
+            - exp not in past
+            - bound to this change_id
+            - required_scope ≤ token.scope (low / medium / high)
+            - jti not in consumed-tokens.log (single-use)
+          → kernel preflight + apply
+```
+
+CLI `hearth pending apply <id> --vault <vault>` does not need a token — direct shell session is the human authentication. Token issuance for IDE/web flows lands in v0.5.
+
+## 12. v0.4 — Audit log
+
+`<vault>/.hearth/audit.jsonl`, append-only, file-locked writes. Every mutation event is logged with timestamp, event type, initiator, optional structured data:
+
+```
+adopt.proposed | adopt.applied
+channel.ingested
+changeplan.created | changeplan.applied | changeplan.rejected
+lint.run | doctor.run
+mcp.tool_called
+approval_token.issued | approval_token.consumed | approval_token.rejected
+```
+
+CLI: `hearth log [--vault <dir>] [--since 7d|24h|30m] [--limit N]` for human-readable timeline. v0.4 ships no rotation — `audit.jsonl` grows linearly. Rotation lands in v0.5+.
+
+## 13. v0.4 — Error code contract
+
+Stable strings agents react to per [`hearth://agent-instructions`](../src/core/agent-instructions.ts):
+
+- `STALE_CONTEXT` — a resource the agent saw earlier has changed; re-read and retry
+- `REQUIRES_HUMAN_APPROVAL` — apply needs a token; surface to user, do not loop
+- `REBASE_REQUIRED` — plan op's base_hash drifted; regenerate the op
+- `STALE_TOKEN` — token expired / consumed / wrong; request fresh approval
+- `PERMISSION_DENIED` — SCHEMA does not allow this op; report, do NOT retry with different paths
+- `PLAN_VALIDATION_FAILED` — generic plan validator failure with per-issue list
+
+## 14. Versioning
+
+This is `v0.4`. The roadmap (auto-policy / Views before Moves / WebUI) lives in [`docs/ROADMAP.md`](./ROADMAP.md). High-level positioning lives in [`docs/PRODUCT.md`](./PRODUCT.md) — read PRODUCT first if you've never seen hearth before.
 
 ---
 
-*This SPEC is the contract. The code follows it, not the other way around.*
+*This SPEC is the technical contract. PRODUCT.md is the doctrine. The code follows both.*

@@ -118,35 +118,6 @@ so wechat-cc imports rather than shells out.
 
 ---
 
-## v0.4 — voice memo capture
-
-The highest-leverage mobile capture path. Most knowledge that gets lost is the kind that starts as "I had this thought walking home".
-
-- Voice in (WeChat voice / Telegram voice / native voice app)
-- ASR pipeline (Whisper / Qwen ASR / VoxCPM2 — provider-pluggable)
-- Transcript becomes a `vault_plan_ingest` source
-- Optional: agent proposes which existing concept page this thought relates to
-
-**Done when**: dictating a 30-second thought on the way home produces a reviewable wiki addition by the time you sit down.
-
----
-
-## v0.5 — multi-format extractors
-
-Now we earn the right to ingest the messy real world.
-
-- PDF: pdftotext + vision-LLM fallback, with `claims:` carrying `page:N`
-- Word: pandoc → markdown
-- Excel/CSV: small full / large schema+sample
-- PowerPoint: per-slide text + image OCR
-- Video: ffmpeg + ASR, `claims:` with `timestamp:`
-- Image: OCR + vision description
-- Site adapters: B站, YouTube, 公众号 (and others as community contributes)
-
-**Done when**: the eight formats above all flow through the same `vault_plan_ingest` → `ChangePlan` → review → apply pipeline as text and URL.
-
----
-
 ## v0.4 — Agent Interface & Audit
 
 The leap from "a runnable tool" to "the vault governance layer that any
@@ -263,6 +234,8 @@ Parked deliberately:
 - Cross-channel session bridging (continue a WeChat thread on Telegram tomorrow)
 - Telegram, Discord, voice-app, email channel adapters
 - ACP server (currently we consume MCP; ACP is the inverse where we'd be the agent surface for an editor)
+- Voice memo capture pipeline (WeChat voice / Telegram voice / native voice app → ASR → vault_plan_ingest)
+- Multi-format extractors (PDF / Word / Excel / PowerPoint / video / audio / image / B站 / YouTube / 公众号) — punted as long as text + URL covers the dominant case
 - Hosted services: TTS, sync, managed install (these are not in the open-source core; they are services you optionally pay for)
 
 Track and discuss in GitHub Discussions / issues. PRs welcome but read PRODUCT.md + SPEC.md first.

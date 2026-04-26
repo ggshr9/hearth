@@ -3,7 +3,7 @@
 > The agent-native vault governance layer.
 > Any AI can participate in maintaining your markdown vault — but must respect permission, citation, review, and audit rules.
 
-**Status**: v0.4 complete (alpha). [PRODUCT.md](./docs/PRODUCT.md) is the doctrine; v0.1 deterministic kernel + v0.3 channel runtime + adopt + v0.4 MCP server (with agent instruction pack, token-gated apply, audit log) all shipped. See [INTEGRATIONS.md](./docs/INTEGRATIONS.md) to mount hearth in Claude Code / Cursor / Codex / Continue.dev. Next: v0.5 auto-policy.
+**Status**: v0.4 complete (alpha). [PRODUCT.md](./docs/PRODUCT.md) is the doctrine; [SPEC v0.4](./docs/SPEC.md) is the contract. v0.1 deterministic kernel + v0.3 channel runtime + adopt + v0.4 MCP server (agent instruction pack, token-gated apply, audit log) all shipped. See [INTEGRATIONS.md](./docs/INTEGRATIONS.md) to mount hearth in Claude Code / Cursor / Codex / Continue.dev. Next: v0.2 pending diff + v0.5 auto-policy.
 
 🔗 [tendhearth.com](https://tendhearth.com) — landing
 
@@ -126,25 +126,16 @@ Channels (consumable, swappable)
 
 - [x] Naming + initial repo
 - [x] Landing ([tendhearth.com](https://tendhearth.com))
-- [x] [SPEC v0.2.1](./docs/SPEC.md) — public contract
-- [x] [ROADMAP](./docs/ROADMAP.md) — trust-closure-first sequencing
-- [x] [SECURITY](./docs/SECURITY.md) — threat model + three trust pillars
-- [x] v0.1 deterministic kernel: init / ingest / pending list/show/apply (mock ingest, no LLM)
-- [x] v0.1.1 transaction hardening: preflight-then-write (ChangePlan applies all-or-nothing)
-- [x] v0.1.2 claim verification + query (no-grounding → literal "no answer found in vault") + lint (citation-drift / single-source-stable / orphan / raw append-only)
-- [x] v0.1.3 AgentAdapter + Claude integration (mock + claude both selectable via --agent; malformed plans rejected before pending)
-- [ ] v0.2 pending review + diff + rebase
-- [x] v0.3.0 channel adapter spike — runtime API + channel-inbox materialize + 4 tests (no vault writes from inbound; malformed plans still rejected)
-- [x] v0.3.x adopt + doctor — bring an existing vault into hearth without migrating files (`hearth adopt <vault>`, conservative defaults, idempotent); safety-ordered target dir selection in mock-adapter
-- [ ] v0.3.1 owner-only `/hearth` command surface over WeChat
-- [ ] v0.3.2 wechat-cc end-to-end demo (capture → pending → approve → query)
-- [x] v0.4 Agent Interface & Audit — MCP server (tools + resources + prompts), agent instruction pack, token-gated apply, audit log, hearth log CLI, INTEGRATIONS guide for Claude Code / Cursor / Codex / Continue.dev
-- [x] `hearth setup` interactive onboarding wizard (Obsidian-vault detection, adopt + doctor, optional Claude Code MCP config write)
-- [ ] v0.5 auto-policy + risk classifier + audit rotation
-- [ ] v0.6 Views before Moves (07 Hearth Proposals/, auto-generated MOC, restructure proposals)
-- [ ] v0.7 human trust surface (local console + multi-vault)
-- [ ] (deferred) voice memo capture
-- [ ] (deferred) multi-format extractors (PDF/Word/Excel/PPT/video/audio/image/B站/YouTube/公众号)
+- [x] **Foundations** — naming, landing ([tendhearth.com](https://tendhearth.com)), [PRODUCT](./docs/PRODUCT.md) / [SPEC](./docs/SPEC.md) / [ROADMAP](./docs/ROADMAP.md) / [SECURITY](./docs/SECURITY.md)
+- [x] **v0.1 — deterministic kernel** (init, ChangePlan transactions, claim-grounded query, lint, AgentAdapter w/ mock + Claude)
+- [x] **v0.3.0 — channel adapter spike** + adopt + doctor (`hearth setup` wizard one-command onboarding)
+- [x] **v0.4 — Agent Interface & Audit** (MCP server, agent instruction pack, token-gated apply, audit log, `hearth log`, [INTEGRATIONS](./docs/INTEGRATIONS.md) guide)
+- [ ] **v0.2 — pending review + diff + rebase**
+- [ ] **v0.3.1 / v0.3.2 — owner-only `/hearth` over WeChat + end-to-end mobile demo**
+- [ ] **v0.5 — auto-policy + risk classifier + audit rotation**
+- [ ] **v0.6 — Views before Moves + `hearth watch`** (see [RESEARCH-AGENT.md](./docs/RESEARCH-AGENT.md))
+- [ ] **v0.7 — human trust surface** (local console + multi-vault)
+- [ ] **Beyond v0.7** — voice capture, multi-format extractors, semantic search (see [ROADMAP](./docs/ROADMAP.md#beyond-v07))
 
 ## License
 

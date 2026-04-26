@@ -1,5 +1,11 @@
 # Why hearth
 
+> This page is the *background* — pattern roots, what's missing in existing
+> implementations, and the discipline hearth holds itself to. For the
+> *current product doctrine* (positioning, principles, what hearth is and
+> isn't, the four action types, View-before-Move), read
+> [`PRODUCT.md`](./PRODUCT.md) first.
+
 > "Obsidian is the IDE; the LLM is the programmer; the wiki is the codebase." — Karpathy's [LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)
 
 ## The pattern
