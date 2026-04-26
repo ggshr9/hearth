@@ -110,6 +110,32 @@ describe('doctor: read-only health check', () => {
   });
 });
 
+describe('doctor: cloudflared check (advisory)', () => {
+  it('reports cloudflared status with an install hint when absent', () => {
+    const schema = '---\ntype: meta\n---\n\n## hearth permissions\n\n| dir | human | agent |\n|-----|-------|-------|\n| raw/ | add | add |\n| 06 Hearth Inbox/ | rw | rw |\n';
+    const vault = makeVaultWithDirs(['raw', '06 Hearth Inbox'], schema);
+    const report = runDoctor(vault);
+    const cf = report.checks.find(c => c.name.toLowerCase().includes('cloudflared'));
+    expect(cf).toBeDefined();
+    if (!cf!.ok) {
+      expect(cf!.detail?.toLowerCase()).toMatch(/install|brew|npm/);
+    }
+  });
+
+  it('a missing cloudflared does NOT fail the overall report', () => {
+    const schema = '---\ntype: meta\n---\n\n## hearth permissions\n\n| dir | human | agent |\n|-----|-------|-------|\n| raw/ | add | add |\n| 06 Hearth Inbox/ | rw | rw |\n';
+    const vault = makeVaultWithDirs(['raw', '06 Hearth Inbox'], schema);
+    const report = runDoctor(vault);
+    const cf = report.checks.find(c => c.name.toLowerCase().includes('cloudflared'));
+    expect(cf).toBeDefined();
+    if (!cf!.ok) {
+      // Other checks pass → overall report should still be ok=true
+      const otherChecksAllPass = report.checks.filter(c => c !== cf).every(c => c.ok);
+      if (otherChecksAllPass) expect(report.ok).toBe(true);
+    }
+  });
+});
+
 describe('mock-adapter target: safety-ordered', () => {
   function fixtureSchema(extraRows: string): string {
     return [

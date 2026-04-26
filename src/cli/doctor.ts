@@ -6,6 +6,7 @@
 
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { execSync } from 'node:child_process';
 import { loadSchema, SchemaError, permits } from '../core/schema.ts';
 import { buildClaimIndex } from '../core/citations.ts';
 
@@ -80,8 +81,23 @@ export function runDoctor(vaultRoot: string): DoctorReport {
     checks.push({ name: 'claim index builds', ok: false, detail: (e as Error).message });
   }
 
-  const ok = checks.every(c => c.ok);
-  return { ok, checks };
+  // 6. cloudflared on PATH (mobile review surface dependency — advisory).
+  // Missing cloudflared does not fail the report: channel ingest and CLI
+  // apply still work without it; only the mobile review URL is unreachable.
+  try {
+    execSync('which cloudflared', { stdio: 'ignore' });
+    checks.push({ name: 'cloudflared on PATH', ok: true });
+  } catch {
+    checks.push({
+      name: 'cloudflared on PATH',
+      ok: false,
+      detail: 'cloudflared is required for hearth review (mobile diff URL). Install: `brew install cloudflared` (macOS) or `npm i -g cloudflared`. Without it, channel ingest still works; only the review surface is unreachable.',
+    });
+  }
+
+  // Ignore cloudflared check when computing overall ok: it's advisory only.
+  const okChecks = checks.filter(c => c.name !== 'cloudflared on PATH');
+  return { ok: okChecks.every(c => c.ok), checks };
 }
 
 export function renderDoctorReport(r: DoctorReport): string {
