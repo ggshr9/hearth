@@ -241,3 +241,39 @@ describe('ingestFromChannel emits review_url when a tunnel manager is provided',
     }
   });
 });
+
+describe('ingestFromChannel summary format (spec §7)', () => {
+  it('summary is plain text, no emoji, includes change_id and op count', async () => {
+    const vault = makeVault();
+    const stateDir = makeStateDir();
+    const r = await ingestFromChannel(
+      { channel: 'cli', message_id: 'fmt-1', from: 'me', text: 'plain',
+        received_at: new Date().toISOString() },
+      { vaultRoot: vault, agent: 'mock', hearthStateDir: stateDir },
+    );
+    expect(r.ok).toBe(true);
+    expect(r.summary).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u); // no emoji
+    expect(r.summary).toContain(r.change_id!);
+    expect(r.summary).toMatch(/\d+ ops?/);
+    expect(r.summary).toContain(`risk=${r.risk}`);
+  });
+
+  it('summary includes review_url on its own line when tunnel present', async () => {
+    const vault = makeVault();
+    const stateDir = makeStateDir();
+    const server = startReviewServer({ port: 0, vaultRoot: vault, hearthStateDir: stateDir });
+    const mgr = new TunnelManager({ binary: FAKE_CF, localPort: server.port, idleCloseMs: 60_000 });
+    try {
+      const r = await ingestFromChannel(
+        { channel: 'cli', message_id: 'fmt-2', from: 'me', text: 'with url',
+          received_at: new Date().toISOString() },
+        { vaultRoot: vault, agent: 'mock', hearthStateDir: stateDir, tunnelManager: mgr },
+      );
+      expect(r.review_url).toBeDefined();
+      expect(r.summary).toContain(r.review_url!);
+    } finally {
+      await mgr.close();
+      server.stop();
+    }
+  });
+});

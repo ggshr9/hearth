@@ -211,7 +211,12 @@ export async function ingestFromChannel(
     }
   }
 
-  const summary = `pending ChangePlan ${plan.change_id} · risk=${plan.risk} · ${plan.ops.length} op${plan.ops.length === 1 ? '' : 's'} · review=${plan.requires_review} · apply via: hearth pending apply ${plan.change_id}`;
+  const lines = [
+    `hearth pending ${plan.change_id}`,
+    `${plan.ops.length} op${plan.ops.length === 1 ? '' : 's'} · risk=${plan.risk}${plan.requires_review ? ' · review' : ''}`,
+  ];
+  if (reviewUrl) lines.push(reviewUrl);
+  const summary = lines.join('\n');
   return {
     ok: true,
     change_id: plan.change_id,
