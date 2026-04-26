@@ -136,7 +136,7 @@ describe('review-server: POST /p/:id/apply', () => {
     expect(res.status).toBe(403);
   });
 
-  it('consumes the token (plan removed after apply; second POST returns 403)', async () => {
+  it('consumes the token (plan removed after apply; second POST returns 404)', async () => {
     const vault = makeVault();
     const stateDir = makeStateDir();
     const r = await ingestFromChannel(
@@ -149,8 +149,8 @@ describe('review-server: POST /p/:id/apply', () => {
     const u = `http://127.0.0.1:${handle.port}/p/${r.change_id}/apply?t=${encodeURIComponent(token)}`;
     expect((await fetch(u, { method: 'POST' })).status).toBe(200);
     // Token is consumed and plan is removed after successful apply.
-    // Second request fails due to consumed token (403), not missing plan.
-    expect((await fetch(u, { method: 'POST' })).status).toBe(403);
+    // Second request fails to load plan (it was removed), returns 404.
+    expect((await fetch(u, { method: 'POST' })).status).toBe(404);
   });
 
   it('returns 409 apply failed when kernel rejects (precondition violation)', async () => {
@@ -242,10 +242,10 @@ describe('review-server: POST /p/:id/reject', () => {
       `http://127.0.0.1:${handle.port}/p/${r.change_id}/reject?t=${encodeURIComponent(token)}`,
       { method: 'POST' },
     )).status).toBe(200);
-    // Token now consumed; second action with same token should fail
+    // Plan is removed after successful reject. Second action fails to load plan.
     expect((await fetch(
       `http://127.0.0.1:${handle.port}/p/${r.change_id}/apply?t=${encodeURIComponent(token)}`,
       { method: 'POST' },
-    )).status).toBe(403);
+    )).status).toBe(404);
   });
 });

@@ -80,19 +80,6 @@ async function handleApply(
   if (!token) {
     return staleTokenPage('missing token');
   }
-  // Quick token validity check (without consuming) to fail early on bad tokens,
-  // before attempting to load the plan. This ensures token errors (403) are
-  // reported before plan-not-found errors (404).
-  try {
-    verifyToken({ token, change_id: changeId, required_scope: 'low' });
-  } catch (e) {
-    void audit(opts.vaultRoot, {
-      event: 'approval_token.rejected',
-      initiated_by: 'review-server',
-      data: { change_id: changeId, reason: (e as Error).message },
-    });
-    return staleTokenPage((e as Error).message);
-  }
   // Load plan to determine required scope
   let plan;
   try { plan = store.load(changeId); }
