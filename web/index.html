@@ -143,6 +143,21 @@
   .vault-sample .dim { color: var(--muted); }
   .vault-sample .key { color: var(--accent); }
 
+  pre.install {
+    margin: 1.6em 0;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.1em 1.3em;
+    font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
+    font-size: 0.84em;
+    line-height: 1.55;
+    color: var(--fg-soft);
+    overflow-x: auto;
+    white-space: pre;
+  }
+  pre.install .dim { color: var(--muted); }
+
   /* ── Inline code & links ─────────────────────────────── */
   code { background: var(--bg-elev); padding: 1px 6px; border-radius: 3px; font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace; font-size: 0.86em; color: var(--fg); }
   a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color .12s; }
@@ -254,6 +269,18 @@
 <span class="dim">├── </span><span class="key">02 &lt;topic&gt;/</span><span class="dim">           ← agent-maintained wiki</span>
 <span class="dim">├── </span><span class="key">99 Assets/</span><span class="dim">           ← attachments</span>
 <span class="dim">└── </span><span class="key">SCHEMA.md</span><span class="dim">            ← human-governed contract</span></pre>
+  </section>
+
+  <section>
+    <h2>try it locally</h2>
+    <p>Two minutes from clone to a vault that an agent can ingest into.</p>
+    <pre class="install"><span class="dim">$</span> git clone https://github.com/ggshr9/hearth.git ~/Documents/hearth
+<span class="dim">$</span> cd ~/Documents/hearth &amp;&amp; bun install
+<span class="dim">$</span> bun src/cli/index.ts setup</pre>
+    <p>Mobile review is opt-in. Install <code>cloudflared</code> and <code>hearth review start</code> prints a public URL you can open from your phone — the diff renders in your browser, you tap approve, the kernel applies locally. No data passes through any server we run.</p>
+    <pre class="install"><span class="dim">$</span> brew install cloudflared    <span class="dim"># macOS</span>
+<span class="dim">$</span> npm i -g cloudflared        <span class="dim"># cross-platform</span>
+<span class="dim">$</span> bun src/cli/index.ts review start --vault /path/to/your/vault</pre>
   </section>
 
   <section>
