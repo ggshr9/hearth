@@ -17,7 +17,8 @@
 //
 // SCHEMA.md is required. No SCHEMA, no compile.
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
 export type Permission = 'none' | 'r' | 'add' | 'rw';
@@ -174,4 +175,18 @@ export function permits(
   if (action === 'update') return perm === 'rw';
   if (action === 'delete') return perm === 'rw';
   return false;
+}
+
+
+/** sha256 of SCHEMA.md current contents. Stable across reads, changes on edit. */
+export function schemaVersionHash(vaultRoot: string): string | null {
+  const path = `${vaultRoot.replace(/\/$/, '')}/SCHEMA.md`;
+  if (!existsSync(path)) return null;
+  return 'sha256:' + createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+export function schemaLastModified(vaultRoot: string): string | null {
+  const path = `${vaultRoot.replace(/\/$/, '')}/SCHEMA.md`;
+  if (!existsSync(path)) return null;
+  return new Date(statSync(path).mtimeMs).toISOString();
 }

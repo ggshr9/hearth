@@ -22,6 +22,9 @@ import { lint } from '../core/lint.ts';
 import { ingestFromChannel } from '../runtime.ts';
 import { buildProposal, applyProposal, renderProposalSummary } from './adopt.ts';
 import { runDoctor, renderDoctorReport } from './doctor.ts';
+import { startStdioServer } from '../mcp-server.ts';
+import { audit, readAudit, parseSince } from '../core/audit.ts';
+import { issueToken } from '../core/approval-token.ts';
 
 function fail(msg: string): never {
   process.stderr.write(`hearth: ${msg}\n`);
@@ -192,6 +195,7 @@ function cmdPending(positionals: string[], values: Record<string, string | boole
       for (const r of result.ops) process.stdout.write(`  ${r.ok ? '✓' : '✗'} ${r.op} ${r.path}\n`);
       store.remove(id);
       process.stdout.write(`  removed from pending queue\n`);
+      void audit(vault, { event: 'changeplan.applied', initiated_by: 'cli', data: { change_id: id, ops: result.ops.length } });
     } else {
       process.stderr.write(`✗ apply failed: ${result.error}\n`);
       for (const r of result.ops) process.stderr.write(`  ${r.ok ? '✓' : '✗'} ${r.op} ${r.path}${r.error ? ' — ' + r.error : ''}\n`);
@@ -307,6 +311,7 @@ function cmdAdopt(positionals: string[], values: Record<string, string | boolean
   const result = applyProposal(proposal);
   if (result.appendedToSchema) process.stdout.write(`✓ appended canonical block to ${result.schemaPath}\n`);
   if (result.createdInbox) process.stdout.write(`✓ created ${result.inboxPath}\n`);
+  void audit(proposal.scan.vaultRoot, { event: 'adopt.applied', initiated_by: 'cli', data: { appended: result.appendedToSchema, created: result.createdInbox } });
   if (result.warnings.length > 0) {
     process.stdout.write('\nwarnings:\n');
     for (const w of result.warnings) process.stdout.write(`  ⚠ ${w}\n`);
@@ -319,6 +324,37 @@ function cmdDoctor(_positionals: string[], values: Record<string, string | boole
   const report = runDoctor(vault);
   process.stdout.write(renderDoctorReport(report) + '\n');
   if (!report.ok) process.exit(1);
+}
+
+async function cmdMcp(positionals: string[], values: Record<string, string | boolean | undefined>): Promise<void> {
+  const sub = positionals[0];
+  if (sub !== 'serve') fail(`mcp: unknown subcommand "${sub}". expected: serve`);
+  const vault = resolve((values.vault as string) ?? process.env.HEARTH_VAULT ?? process.cwd());
+  if (!existsSync(join(vault, 'SCHEMA.md'))) {
+    fail(`mcp serve: ${vault} has no SCHEMA.md. Run \`hearth adopt ${vault}\` first.`);
+  }
+  // No stdout chatter — MCP uses stdout for protocol. Log to stderr only.
+  process.stderr.write(`hearth mcp serve: vault=${vault}\n`);
+  await startStdioServer(vault);
+}
+
+function cmdLog(positionals: string[], values: Record<string, string | boolean | undefined>): void {
+  void positionals;
+  const vault = resolve((values.vault as string) ?? process.cwd());
+  const sinceStr = values.since as string | undefined;
+  const since = sinceStr ? parseSince(sinceStr) ?? undefined : undefined;
+  const limit = values.limit ? parseInt(String(values.limit), 10) : 50;
+  const entries = readAudit(vault, { since, limit });
+  if (entries.length === 0) {
+    process.stdout.write('(no audit entries)\n');
+    return;
+  }
+  for (const e of entries) {
+    const tag = e.event.padEnd(28);
+    const by = (e.initiated_by ?? '?').padEnd(16);
+    const data = e.data ? '  ' + JSON.stringify(e.data) : '';
+    process.stdout.write(`${e.ts}  ${tag} ${by}${data}\n`);
+  }
 }
 
 function help(): void {
@@ -335,6 +371,8 @@ usage:
   hearth channel ingest --channel <name> --message-id <id> --from <id> --text "..." [--vault <dir>] [--agent mock|claude]
   hearth adopt <vault-dir> [--dry-run] [--yes]
   hearth doctor [--vault <dir>]
+  hearth mcp serve [--vault <dir>]
+  hearth log [--vault <dir>] [--since 7d|24h|30m] [--limit N]
 
 This is the v0.1 deterministic core loop. No LLM yet — mock ingest produces
 ChangePlans; kernel enforces SCHEMA.md permissions + preconditions on apply.
@@ -361,6 +399,8 @@ function main(): void {
       url: { type: 'string' },
       'dry-run': { type: 'boolean' },
       yes: { type: 'boolean' },
+      since: { type: 'string' },
+      limit: { type: 'string' },
     },
     allowPositionals: true,
     strict: false,
@@ -374,6 +414,8 @@ function main(): void {
     case 'channel': void cmdChannel(positionals, values); return;
     case 'adopt': return cmdAdopt(positionals, values);
     case 'doctor': return cmdDoctor(positionals, values);
+    case 'mcp': void cmdMcp(positionals, values); return;
+    case 'log': return cmdLog(positionals, values);
     case 'help': return help();
     default: fail(`unknown command: ${cmd}. run "hearth help"`);
   }

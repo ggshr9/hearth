@@ -3,7 +3,7 @@
 > The agent-native vault governance layer.
 > Any AI can participate in maintaining your markdown vault — but must respect permission, citation, review, and audit rules.
 
-**Status**: v0.1 complete (alpha). [SPEC v0.2.1](./docs/SPEC.md) is the contract; deterministic kernel + claim-grounded query + read-only lint + Claude / mock agent adapters work end-to-end. Next: wechat-cc as the first channel adapter (v0.3).
+**Status**: v0.4 complete (alpha). [PRODUCT.md](./docs/PRODUCT.md) is the doctrine; v0.1 deterministic kernel + v0.3 channel runtime + adopt + v0.4 MCP server (with agent instruction pack, token-gated apply, audit log) all shipped. See [INTEGRATIONS.md](./docs/INTEGRATIONS.md) to mount hearth in Claude Code / Cursor / Codex / Continue.dev. Next: v0.5 auto-policy.
 
 🔗 [tendhearth.com](https://tendhearth.com) — landing
 
@@ -104,6 +104,7 @@ Channels (consumable, swappable)
 - [`docs/ROADMAP.md`](./docs/ROADMAP.md) — version path (trust closure first, format coverage last)
 - [`docs/SECURITY.md`](./docs/SECURITY.md) — threat model + the three trust pillars
 - [`docs/why.md`](./docs/why.md) — pattern background + design discipline
+- [`docs/INTEGRATIONS.md`](./docs/INTEGRATIONS.md) — copy-paste MCP config for Claude Code / Cursor / Codex / Continue.dev
 
 ## Status
 
@@ -121,7 +122,7 @@ Channels (consumable, swappable)
 - [x] v0.3.x adopt + doctor — bring an existing vault into hearth without migrating files (`hearth adopt <vault>`, conservative defaults, idempotent); safety-ordered target dir selection in mock-adapter
 - [ ] v0.3.1 owner-only `/hearth` command surface over WeChat
 - [ ] v0.3.2 wechat-cc end-to-end demo (capture → pending → approve → query)
-- [ ] v0.4 Agent Interface & Audit (MCP server + agent instruction pack + token-gated apply + hearth log)
+- [x] v0.4 Agent Interface & Audit — MCP server (tools + resources + prompts), agent instruction pack, token-gated apply, audit log, hearth log CLI, INTEGRATIONS guide for Claude Code / Cursor / Codex / Continue.dev
 - [ ] v0.5 auto-policy + risk classifier + audit rotation
 - [ ] v0.6 Views before Moves (07 Hearth Proposals/, auto-generated MOC, restructure proposals)
 - [ ] v0.7 human trust surface (local console + multi-vault)

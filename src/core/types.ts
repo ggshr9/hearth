@@ -103,3 +103,34 @@ export interface AppliedResult {
   /** Set when ok=false: human-readable summary. */
   error?: string;
 }
+
+// ── v0.4 error codes ────────────────────────────────────────────────────────
+//
+// Stable strings agents can switch on. Returned by MCP tools (and in some
+// cases by direct API) to signal hearth-specific failure modes that an agent
+// should react to in known ways. See agent-instructions.md for prescribed
+// reactions.
+
+export const ErrorCode = {
+  /** A resource (schema / vault-map) the agent saw earlier has changed. */
+  STALE_CONTEXT: 'STALE_CONTEXT',
+  /** Apply attempted via MCP without a valid approval token. */
+  REQUIRES_HUMAN_APPROVAL: 'REQUIRES_HUMAN_APPROVAL',
+  /** ChangePlan op's base_hash no longer matches; plan needs rebase. */
+  REBASE_REQUIRED: 'REBASE_REQUIRED',
+  /** Token expired, malformed, or already consumed. */
+  STALE_TOKEN: 'STALE_TOKEN',
+  /** SCHEMA permission table denies this op. */
+  PERMISSION_DENIED: 'PERMISSION_DENIED',
+  /** Catch-all for plan validation failures. */
+  PLAN_VALIDATION_FAILED: 'PLAN_VALIDATION_FAILED',
+} as const;
+
+export type ErrorCodeT = typeof ErrorCode[keyof typeof ErrorCode];
+
+export interface HearthError {
+  code: ErrorCodeT;
+  message: string;
+  /** Optional structured hint for the agent (e.g. CLI command to suggest). */
+  hint?: string;
+}
