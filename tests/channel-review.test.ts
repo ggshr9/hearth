@@ -16,6 +16,7 @@ import {
   listPending,
   showPending,
   applyForOwner,
+  renderPlanMarkdown,
 } from '../src/runtime.ts';
 import { auditLogPath } from '../src/core/audit.ts';
 
@@ -151,6 +152,30 @@ describe('v0.3.1 channel review: list / show / apply', () => {
     });
     expect(r.ok).toBe(false);
     expect(r.rendered).toContain('❌ vault has no SCHEMA.md');
+  });
+
+  it('renderPlanMarkdown: produces a self-contained review document', async () => {
+    const vault = makeVault();
+    const stateDir = makeStateDir();
+    const id = await ingestOne(vault, stateDir, 'msg-md', '# Karpathy LLM Wiki\n\nthe LLM compiles raw sources into a structured wiki');
+
+    const r = renderPlanMarkdown(id, { hearthStateDir: stateDir });
+    expect(r.ok).toBe(true);
+    expect(r.change_id).toBe(id);
+    expect(r.title).toMatch(/Hearth · \d+-op ChangePlan \(low\)/);
+    expect(r.markdown).toContain('# Hearth ChangePlan');
+    expect(r.markdown).toContain('`' + id + '`');
+    expect(r.markdown).toContain('## Operations');
+    expect(r.markdown).toContain('Karpathy LLM Wiki');
+    expect(r.markdown).toContain('To commit, reply');
+    expect(r.markdown).toContain('/hearth apply ' + id);
+  });
+
+  it('renderPlanMarkdown: missing change_id returns ok=false with stub markdown', () => {
+    const stateDir = makeStateDir();
+    const r = renderPlanMarkdown('does-not-exist', { hearthStateDir: stateDir });
+    expect(r.ok).toBe(false);
+    expect(r.markdown).toContain('Plan not found');
   });
 
   it('applyForOwner: missing change_id fails cleanly, no throw', async () => {

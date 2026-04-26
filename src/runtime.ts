@@ -338,6 +338,89 @@ export function showPending(changeId: string, opts: PendingShowOptions = {}): Pe
   return { ok: true, change_id: plan.change_id, rendered: lines.join('\n') };
 }
 
+// ── markdown rendering for share-page surfaces ─────────────────────────
+//
+// Channel adapters that have a "publish a webpage" capability (wechat-cc
+// share_page, telegram inline html, future Local Console) want a fuller
+// rendering than the chat-line summary produced by listPending/showPending.
+// renderPlanMarkdown produces a self-contained markdown document so the
+// channel can hand it straight to its publisher.
+
+export interface RenderPlanOptions {
+  hearthStateDir?: string;
+  /** How many body-preview lines to include per op. Default 40. */
+  previewLines?: number;
+  /** Suffix line at the bottom (e.g. "Reply `/hearth apply <id>` to commit."). */
+  applyHint?: string;
+}
+
+export interface RenderPlanResult {
+  ok: boolean;
+  change_id?: string;
+  /** Title suitable for share-page — short. */
+  title?: string;
+  /** Full markdown body. */
+  markdown: string;
+  error?: string;
+}
+
+export function renderPlanMarkdown(changeId: string, opts: RenderPlanOptions = {}): RenderPlanResult {
+  const stateDir = opts.hearthStateDir ?? defaultStateDir();
+  const store = new PendingStore(join(stateDir, 'pending'));
+  let plan: ChangePlan;
+  try { plan = store.load(changeId); }
+  catch (e) {
+    return { ok: false, markdown: `# Plan not found\n\n\`${changeId}\` is no longer pending.`, error: (e as Error).message };
+  }
+  const previewN = opts.previewLines ?? 40;
+  const lines: string[] = [];
+
+  lines.push(`# Hearth ChangePlan`, '');
+  lines.push(`**\`${plan.change_id}\`**`, '');
+  lines.push(`| risk | review | ops | created |`);
+  lines.push(`| ---- | ------ | --- | ------- |`);
+  lines.push(`| ${plan.risk} | ${plan.requires_review ? 'yes' : 'no'} | ${plan.ops.length} | ${plan.created_at.replace('T', ' ').slice(0, 16)} |`);
+  lines.push('');
+  if (plan.note) {
+    lines.push(`> ${plan.note}`, '');
+  }
+
+  lines.push(`## Operations`, '');
+  for (let i = 0; i < plan.ops.length; i++) {
+    const op = plan.ops[i]!;
+    lines.push(`### ${i + 1}. \`${op.op}\` → \`${op.path}\``, '');
+    lines.push(`**reason**: ${op.reason}`, '');
+    if (op.precondition.exists) {
+      lines.push(`*precondition*: file must exist; base hash \`${op.precondition.base_hash?.slice(0, 16) ?? '–'}…\``, '');
+    } else {
+      lines.push(`*precondition*: file must NOT already exist (create-only)`, '');
+    }
+    if (op.body_preview) {
+      const previewText = op.body_preview.split('\n').slice(0, previewN).join('\n');
+      const moreLines = Math.max(0, op.body_preview.split('\n').length - previewN);
+      lines.push('```markdown');
+      lines.push(previewText);
+      if (moreLines > 0) lines.push(`… (+${moreLines} more lines)`);
+      lines.push('```', '');
+    }
+  }
+
+  lines.push(`---`, '');
+  if (opts.applyHint) {
+    lines.push(opts.applyHint);
+  } else {
+    lines.push(`To commit, reply: \`/hearth apply ${plan.change_id}\``);
+  }
+  lines.push('', `*Hearth v0.3.1 channel review surface. The vault has not been modified — this plan is queued for your approval.*`);
+
+  return {
+    ok: true,
+    change_id: plan.change_id,
+    title: `Hearth · ${plan.ops.length}-op ChangePlan (${plan.risk})`,
+    markdown: lines.join('\n'),
+  };
+}
+
 export interface ApplyForOwnerOptions {
   vaultRoot: string;
   hearthStateDir?: string;
