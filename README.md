@@ -26,20 +26,35 @@ Query    →  ask in chat / voice → answer with claim-level citations
 Lint     →  periodic audit → contradictions, orphans, drift, single-source claims
 ```
 
-## Five-minute demo (target shape; v0.1 is being built)
+## Two-minute setup
 
 ```bash
-bun src/cli/index.ts init ~/demo-vault
-# default agent is mock (deterministic, no API key needed)
-bun src/cli/index.ts ingest examples/karpathy-llm-wiki.md --vault ~/demo-vault
-# or use Claude:
-ANTHROPIC_API_KEY=sk-ant-... bun src/cli/index.ts ingest examples/karpathy-llm-wiki.md --vault ~/demo-vault --agent claude
+git clone https://github.com/ggshr9/hearth.git ~/Documents/hearth
+cd ~/Documents/hearth && bun install
 
-bun src/cli/index.ts pending list
-bun src/cli/index.ts pending apply <change_id> --vault ~/demo-vault
-bun src/cli/index.ts query "How is LLM Wiki different from RAG?" --vault ~/demo-vault
-bun src/cli/index.ts lint --vault ~/demo-vault
+# One command. Detects your Obsidian vault, runs adopt with preview,
+# verifies with doctor, optionally writes a Claude Code MCP config.
+bun src/cli/index.ts setup
 ```
+
+After setup, capture from anywhere:
+
+```bash
+hearth channel ingest --channel cli --message-id m1 --from you \
+  --text "your first thought" --vault /path/to/vault
+hearth pending list
+hearth pending apply <change_id> --vault /path/to/vault
+hearth query "first thought" --vault /path/to/vault
+hearth log --vault /path/to/vault --since 1d
+```
+
+Or, with Claude Code mounted via MCP (setup wizard offers to wire this for you):
+
+> "Read hearth://agent-instructions then hearth://schema, then propose a
+> ChangePlan for this content: ..."
+
+Claude Code uses the hearth tools directly; every mutation still goes through
+ChangePlan + token gate + audit log.
 
 Expected output:
 
@@ -123,6 +138,7 @@ Channels (consumable, swappable)
 - [ ] v0.3.1 owner-only `/hearth` command surface over WeChat
 - [ ] v0.3.2 wechat-cc end-to-end demo (capture → pending → approve → query)
 - [x] v0.4 Agent Interface & Audit — MCP server (tools + resources + prompts), agent instruction pack, token-gated apply, audit log, hearth log CLI, INTEGRATIONS guide for Claude Code / Cursor / Codex / Continue.dev
+- [x] `hearth setup` interactive onboarding wizard (Obsidian-vault detection, adopt + doctor, optional Claude Code MCP config write)
 - [ ] v0.5 auto-policy + risk classifier + audit rotation
 - [ ] v0.6 Views before Moves (07 Hearth Proposals/, auto-generated MOC, restructure proposals)
 - [ ] v0.7 human trust surface (local console + multi-vault)

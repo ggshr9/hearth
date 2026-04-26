@@ -25,6 +25,7 @@ import { runDoctor, renderDoctorReport } from './doctor.ts';
 import { startStdioServer } from '../mcp-server.ts';
 import { audit, readAudit, parseSince } from '../core/audit.ts';
 import { issueToken } from '../core/approval-token.ts';
+import { runSetup } from './setup.ts';
 
 function fail(msg: string): never {
   process.stderr.write(`hearth: ${msg}\n`);
@@ -357,10 +358,19 @@ function cmdLog(positionals: string[], values: Record<string, string | boolean |
   }
 }
 
+async function cmdSetup(_positionals: string[], _values: Record<string, string | boolean | undefined>): Promise<void> {
+  // Find hearth's own repo root (where this script lives)
+  const here = dirname(fileURLToPath(import.meta.url));
+  const hearthRepoRoot = resolve(here, '..', '..');
+  const code = await runSetup({ hearthRepoRoot });
+  process.exit(code);
+}
+
 function help(): void {
   process.stdout.write(`hearth v0.1.0-alpha
 
 usage:
+  hearth setup                                    interactive one-command onboarding (recommended)
   hearth init <vault-dir> [--template default] [--force]
   hearth ingest <file.md> [--vault <dir>] [--agent mock|claude]
   hearth pending list
@@ -416,6 +426,7 @@ function main(): void {
     case 'doctor': return cmdDoctor(positionals, values);
     case 'mcp': void cmdMcp(positionals, values); return;
     case 'log': return cmdLog(positionals, values);
+    case 'setup': void cmdSetup(positionals, values); return;
     case 'help': return help();
     default: fail(`unknown command: ${cmd}. run "hearth help"`);
   }
