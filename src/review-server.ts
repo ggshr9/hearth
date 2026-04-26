@@ -71,6 +71,21 @@ function errorPage(status: number, title: string, detail: string): Response {
   return new Response(body, { status, headers: { 'content-type': 'text/html; charset=utf-8' } });
 }
 
+function rebaseRequiredPage(changeId: string): Response {
+  const id = escapeHtml(changeId);
+  const body = `<!doctype html>
+<html><head><meta charset="utf-8"><title>hearth · rebase required</title>
+<style>body{font-family:-apple-system,sans-serif;max-width:560px;margin:4rem auto;padding:0 1.25rem;color:#1c1c1e;line-height:1.55}h1{font-size:1.125rem;font-weight:600}p{color:#666}code{font-family:ui-monospace,Menlo,monospace;font-size:.875em;background:#f0f0f0;padding:0 .2em;border-radius:2px}</style>
+</head><body>
+  <h1>hearth · rebase required</h1>
+  <p>The target file changed since this plan was created. The plan needs to be regenerated against the new file state before it can be applied.</p>
+  <p>From your terminal, run:</p>
+  <p><code>hearth pending rebase ${id}</code></p>
+  <p>You'll get a fresh notification with a new review link once the rebase completes.</p>
+</body></html>`;
+  return new Response(body, { status: 409, headers: { 'content-type': 'text/html; charset=utf-8' } });
+}
+
 async function handleApply(
   opts: ReviewServerOptions,
   store: PendingStore,
@@ -125,6 +140,9 @@ async function handleApply(
     initiated_by: 'review-server',
     data: { change_id: changeId, error: result.error },
   });
+  if (result.error?.includes('rebase')) {
+    return rebaseRequiredPage(changeId);
+  }
   return errorPage(409, 'apply failed', escapeHtml(result.error ?? 'kernel rejected'));
 }
 

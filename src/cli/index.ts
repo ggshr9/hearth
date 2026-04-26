@@ -430,6 +430,8 @@ usage:
   hearth pending list
   hearth pending show <change_id>
   hearth pending apply <change_id> [--vault <dir>]
+  hearth pending share <change_id>                share plan for mobile review (issues URL token)
+  hearth review start [--vault <dir>]             start mobile review surface (review-server + tunnel)
   hearth query "<question>" [--vault <dir>]
   hearth lint [--vault <dir>]
   hearth channel ingest --channel <name> --message-id <id> --from <id> --text "..." [--vault <dir>] [--agent mock|claude]

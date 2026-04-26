@@ -189,6 +189,44 @@ describe('review-server: POST /p/:id/apply', () => {
     expect(lines.some(l => l.includes('changeplan.rejected'))).toBe(true);
     expect(lines.some(l => l.includes('approval_token.consumed'))).toBe(true);
   });
+
+  it('returns a rebase-required recovery page (409) when base_hash drifts', async () => {
+    const vault = makeVault();
+    const stateDir = makeStateDir();
+    const r = await ingestFromChannel(
+      { channel: 'cli', message_id: 'apply-rebase', from: 'me', text: 'rebase me',
+        received_at: new Date().toISOString() },
+      { vaultRoot: vault, agent: 'mock', hearthStateDir: stateDir },
+    );
+    expect(r.ok).toBe(true);
+
+    // Sabotage: write a file at the target path so the create op's
+    // precondition.exists=false fires (the kernel will reject with a
+    // "rebase" hint).
+    const { PendingStore } = await import('../src/core/pending-store.ts');
+    const store = new PendingStore(join(stateDir, 'pending'));
+    const plan = store.load(r.change_id!);
+    const targetPath = plan.ops[0]!.path;
+    const fullPath = join(vault, targetPath);
+    mkdirSync(join(fullPath, '..'), { recursive: true });
+    writeFileSync(fullPath, 'pre-existing content');
+    // Tweak: kernel's "rebase" hint fires on base_hash mismatch.
+    // The simplest way to surface that exact wording: alter the plan to
+    // declare exists:true with a wrong base_hash.
+    plan.ops[0]!.precondition = { exists: true, base_hash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000' };
+    store.save(plan);
+
+    const { token } = issueToken({ change_id: r.change_id!, issued_by: 'test' });
+    handle = startReviewServer({ port: 0, vaultRoot: vault, hearthStateDir: stateDir });
+    const res = await fetch(
+      `http://127.0.0.1:${handle.port}/p/${r.change_id}/apply?t=${encodeURIComponent(token)}`,
+      { method: 'POST' },
+    );
+    expect(res.status).toBe(409);
+    const body = await res.text();
+    expect(body).toContain('rebase required');
+    expect(body).toContain(`hearth pending rebase ${r.change_id}`);
+  });
 });
 
 describe('review-server: POST /p/:id/reject', () => {
