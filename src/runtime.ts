@@ -315,10 +315,10 @@ export function listPending(opts: PendingListOptions = {}): PendingListResult {
   if (plans.length === 0) {
     return { items, rendered: '(no pending plans)' };
   }
-  const lines = [`📋 pending (${plans.length}${plans.length > limit ? `, latest ${limit}` : ''})`, ''];
+  const lines = [`pending (${plans.length}${plans.length > limit ? `, latest ${limit}` : ''})`, ''];
   for (const it of items) {
-    const review = it.requires_review ? '👁' : ' ';
-    lines.push(`${review} ${it.change_id}  ${it.risk}  ${it.op_count}op  ${it.created_at.slice(11, 16)}`);
+    const review = it.requires_review ? 'review' : '     ';
+    lines.push(`${review}  ${it.change_id}  ${it.risk}  ${it.op_count}op  ${it.created_at.slice(11, 16)}`);
     lines.push(`  → ${it.primary_path}`);
     lines.push(`  ${it.preview}`);
     lines.push('');
@@ -345,28 +345,13 @@ export function showPending(changeId: string, opts: PendingShowOptions = {}): Pe
   const stateDir = opts.hearthStateDir ?? defaultStateDir();
   const store = new PendingStore(join(stateDir, 'pending'));
   let plan: ChangePlan;
-  try {
-    plan = store.load(changeId);
-  } catch (e) {
-    return { ok: false, rendered: `❌ pending plan not found: ${changeId}`, error: (e as Error).message };
+  try { plan = store.load(changeId); }
+  catch (e) {
+    return { ok: false, rendered: `pending plan not found: ${changeId}`, error: (e as Error).message };
   }
-  const previewN = opts.previewLines ?? 6;
-  const lines: string[] = [
-    `🔥 ${plan.change_id}`,
-    `risk: ${plan.risk}    review: ${plan.requires_review}    ops: ${plan.ops.length}`,
-    `created: ${plan.created_at}`,
-  ];
-  if (plan.note) lines.push(`note: ${plan.note}`);
-  lines.push('');
-  for (const op of plan.ops) {
-    lines.push(`[${op.op}] ${op.path}`);
-    lines.push(`  reason: ${op.reason}`);
-    if (op.body_preview) {
-      const preview = op.body_preview.split('\n').slice(0, previewN).join('\n  ');
-      lines.push('  preview:', '  ' + preview);
-    }
-  }
-  return { ok: true, change_id: plan.change_id, rendered: lines.join('\n') };
+  const out = renderPlanReview(plan, { format: 'ansi', maxOpBodyLines: opts.previewLines ?? 6 });
+  if (out.format !== 'ansi') throw new Error('renderPlanReview did not return ansi');
+  return { ok: true, change_id: plan.change_id, rendered: out.text };
 }
 
 // ── markdown rendering for share-page surfaces ─────────────────────────
@@ -456,7 +441,7 @@ export async function applyForOwner(
   try { schema = loadSchema(opts.vaultRoot); }
   catch (e) {
     if (e instanceof SchemaError) {
-      return { ok: false, change_id: changeId, rendered: `❌ vault has no SCHEMA.md`, error: e.message };
+      return { ok: false, change_id: changeId, rendered: `vault has no SCHEMA.md`, error: e.message };
     }
     throw e;
   }
@@ -464,7 +449,7 @@ export async function applyForOwner(
   let plan: ChangePlan;
   try { plan = store.load(changeId); }
   catch (e) {
-    return { ok: false, change_id: changeId, rendered: `❌ pending plan not found: ${changeId}`, error: (e as Error).message };
+    return { ok: false, change_id: changeId, rendered: `pending plan not found: ${changeId}`, error: (e as Error).message };
   }
 
   const kernel = createKernel(opts.vaultRoot, schema);
@@ -478,10 +463,10 @@ export async function applyForOwner(
       data: { change_id: changeId, ops: result.ops.length, owner_id: opts.ownerId },
     });
     const lines = [
-      `✅ applied ${changeId}`,
+      `applied ${changeId}`,
       `${result.ops.length} op${result.ops.length === 1 ? '' : 's'} written`,
     ];
-    for (const r of result.ops) lines.push(`  ${r.ok ? '✓' : '✗'} ${r.op} ${r.path}`);
+    for (const r of result.ops) lines.push(`  ${r.ok ? 'ok ' : 'err'} ${r.op} ${r.path}`);
     return { ok: true, change_id: changeId, ops_applied: result.ops.length, rendered: lines.join('\n') };
   }
 
@@ -490,9 +475,9 @@ export async function applyForOwner(
     initiated_by: `channel:${opts.channel}`,
     data: { change_id: changeId, error: result.error, owner_id: opts.ownerId },
   });
-  const lines = [`❌ apply failed: ${changeId}`, result.error ?? '(unknown error)'];
+  const lines = [`apply failed: ${changeId}`, result.error ?? '(unknown error)'];
   for (const r of result.ops) {
-    if (!r.ok) lines.push(`  ✗ ${r.op} ${r.path} — ${r.error ?? ''}`);
+    if (!r.ok) lines.push(`  err ${r.op} ${r.path} — ${r.error ?? ''}`);
   }
   return { ok: false, change_id: changeId, rendered: lines.join('\n'), error: result.error };
 }

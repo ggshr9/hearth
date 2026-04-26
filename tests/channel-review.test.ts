@@ -99,8 +99,8 @@ describe('v0.3.1 channel review: list / show / apply', () => {
     const r = showPending(id, { hearthStateDir: stateDir });
     expect(r.ok).toBe(true);
     expect(r.change_id).toBe(id);
-    expect(r.rendered).toContain('🔥 ' + id);
-    expect(r.rendered).toMatch(/risk: (low|medium|high)/);
+    expect(r.rendered).toContain(id);
+    expect(r.rendered).toMatch(/risk:\s+(low|medium|high)/);
     expect(r.rendered).toMatch(/\[create\] /);
   });
 
@@ -108,7 +108,7 @@ describe('v0.3.1 channel review: list / show / apply', () => {
     const stateDir = makeStateDir();
     const r = showPending('does-not-exist', { hearthStateDir: stateDir });
     expect(r.ok).toBe(false);
-    expect(r.rendered).toContain('❌ pending plan not found: does-not-exist');
+    expect(r.rendered).toContain('pending plan not found: does-not-exist');
   });
 
   it('applyForOwner: writes vault files, removes from pending, audits with channel initiator', async () => {
@@ -124,7 +124,7 @@ describe('v0.3.1 channel review: list / show / apply', () => {
     });
     expect(r.ok).toBe(true);
     expect(r.ops_applied).toBeGreaterThan(0);
-    expect(r.rendered).toContain('✅ applied ' + id);
+    expect(r.rendered).toContain('applied ' + id);
 
     // pending queue purged
     const after = listPending({ hearthStateDir: stateDir });
@@ -151,7 +151,7 @@ describe('v0.3.1 channel review: list / show / apply', () => {
       channel: 'wechat',
     });
     expect(r.ok).toBe(false);
-    expect(r.rendered).toContain('❌ vault has no SCHEMA.md');
+    expect(r.rendered).toContain('vault has no SCHEMA.md');
   });
 
   it('renderPlanMarkdown: produces a self-contained review document', async () => {
@@ -188,7 +188,38 @@ describe('v0.3.1 channel review: list / show / apply', () => {
       channel: 'wechat',
     });
     expect(r.ok).toBe(false);
-    expect(r.rendered).toContain('❌ pending plan not found: does-not-exist');
+    expect(r.rendered).toContain('pending plan not found: does-not-exist');
+  });
+
+  describe('channel renderers honor aesthetic restraint (no emoji)', () => {
+    it('listPending output has no emoji', async () => {
+      const vault = makeVault();
+      const stateDir = makeStateDir();
+      await ingestOne(vault, stateDir, 'm1', 'a');
+      await ingestOne(vault, stateDir, 'm2', 'b');
+      const out = listPending({ hearthStateDir: stateDir });
+      expect(out.rendered).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
+      expect(out.rendered).not.toMatch(/[\u{2700}-\u{27BF}]/u); // dingbats (✓✗)
+    });
+
+    it('showPending output has no emoji', async () => {
+      const vault = makeVault();
+      const stateDir = makeStateDir();
+      const id = await ingestOne(vault, stateDir, 'm3', 'c');
+      const out = showPending(id, { hearthStateDir: stateDir });
+      expect(out.rendered).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
+      expect(out.rendered).not.toMatch(/[\u{2700}-\u{27BF}]/u);
+    });
+
+    it('applyForOwner output has no emoji on success', async () => {
+      const vault = makeVault();
+      const stateDir = makeStateDir();
+      const id = await ingestOne(vault, stateDir, 'm4', 'd');
+      const out = await applyForOwner(id, { vaultRoot: vault, hearthStateDir: stateDir, ownerId: 'me', channel: 'cli' });
+      expect(out.rendered).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
+      expect(out.rendered).not.toMatch(/[\u{2700}-\u{27BF}]/u);
+      expect(out.ok).toBe(true);
+    });
   });
 });
 
