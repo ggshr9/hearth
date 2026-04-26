@@ -19,6 +19,7 @@ import { loadSchema, SchemaError } from './core/schema.ts';
 import { PendingStore } from './core/pending-store.ts';
 import { validateChangePlan, PlanValidationError } from './core/plan-validator.ts';
 import { renderPlanReview } from './core/plan-review.ts';
+import { issueToken } from './core/approval-token.ts';
 import { MockAgentAdapter } from './ingest/mock-adapter.ts';
 import { ClaudeAgentAdapter } from './ingest/claude-adapter.ts';
 import { createKernel } from './core/vault-kernel.ts';
@@ -50,6 +51,9 @@ export interface ChannelIngestOptions {
   adapterOverride?: AgentAdapter;
   /** Inject a pending store (test isolation). Default: <stateDir>/pending */
   pendingStoreOverride?: PendingStore;
+  /** Optional tunnel manager — when present, the result includes a
+   *  capability URL (review_url) the channel adapter can deliver. */
+  tunnelManager?: { ensureUrl(): Promise<string>; notePlanCount(n: number): void };
 }
 
 export interface ChannelIngestResult {
@@ -64,6 +68,9 @@ export interface ChannelIngestResult {
   source_path?: string;
   /** Human-readable line the channel can send back. */
   summary: string;
+  /** Capability URL for human review of this plan (token-bound, single-use,
+   *  ttl ~5 min). Set only when caller provided a tunnelManager. */
+  review_url?: string;
   /** Set when ok=false. */
   error?: string;
 }
@@ -188,6 +195,22 @@ export async function ingestFromChannel(
   const store = opts.pendingStoreOverride ?? new PendingStore(join(stateDir, 'pending'));
   const savedPath = store.save(plan);
 
+  // Optional capability URL for the review surface. Tunnel failure is
+  // non-fatal — plan is still pending; user can apply via CLI or wait
+  // for the next push.
+  let reviewUrl: string | undefined;
+  if (opts.tunnelManager) {
+    try {
+      const tunnelUrl = await opts.tunnelManager.ensureUrl();
+      const { token } = issueToken({ change_id: plan.change_id, issued_by: `channel:${msg.channel}` });
+      reviewUrl = `${tunnelUrl}/p/${encodeURIComponent(plan.change_id)}?t=${encodeURIComponent(token)}`;
+      // Update pending count so the manager keeps the tunnel alive.
+      opts.tunnelManager.notePlanCount(store.list().length);
+    } catch {
+      reviewUrl = undefined;
+    }
+  }
+
   const summary = `pending ChangePlan ${plan.change_id} · risk=${plan.risk} · ${plan.ops.length} op${plan.ops.length === 1 ? '' : 's'} · review=${plan.requires_review} · apply via: hearth pending apply ${plan.change_id}`;
   return {
     ok: true,
@@ -198,6 +221,7 @@ export async function ingestFromChannel(
     requires_review: plan.requires_review,
     source_path: sourcePath,
     summary,
+    review_url: reviewUrl,
   };
 }
 

@@ -191,3 +191,53 @@ describe('v0.3.1 channel review: list / show / apply', () => {
     expect(r.rendered).toContain('❌ pending plan not found: does-not-exist');
   });
 });
+
+import { startReviewServer } from '../src/review-server.ts';
+import { TunnelManager } from '../src/tunnel-manager.ts';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const FAKE_CF = resolve(__dirname, 'fixtures', 'fake-cloudflared.sh');
+
+describe('ingestFromChannel emits review_url when a tunnel manager is provided', () => {
+  it('result.review_url is a /p/:change_id?t=<token> URL on the tunnel host', async () => {
+    const vault = makeVault();
+    const stateDir = makeStateDir();
+    const server = startReviewServer({ port: 0, vaultRoot: vault, hearthStateDir: stateDir });
+    const mgr = new TunnelManager({ binary: FAKE_CF, localPort: server.port, idleCloseMs: 60_000 });
+    try {
+      const r = await ingestFromChannel(
+        { channel: 'cli', message_id: 'rurl-1', from: 'me', text: 'hello world',
+          received_at: new Date().toISOString() },
+        { vaultRoot: vault, agent: 'mock', hearthStateDir: stateDir, tunnelManager: mgr },
+      );
+      expect(r.ok).toBe(true);
+      expect(r.review_url).toBeDefined();
+      expect(r.review_url).toMatch(/trycloudflare\.com\/p\/[^?]+\?t=/);
+      expect(r.review_url).toContain(r.change_id!);
+    } finally {
+      await mgr.close();
+      server.stop();
+    }
+  });
+
+  it('tunnel failure is non-fatal — plan is still pending without review_url', async () => {
+    const vault = makeVault();
+    const stateDir = makeStateDir();
+    // Use a binary that exits immediately so tunnel.start rejects.
+    const mgr = new TunnelManager({ binary: '/bin/false', localPort: 12345, idleCloseMs: 60_000 });
+    try {
+      const r = await ingestFromChannel(
+        { channel: 'cli', message_id: 'rurl-fail', from: 'me', text: 'no tunnel today',
+          received_at: new Date().toISOString() },
+        { vaultRoot: vault, agent: 'mock', hearthStateDir: stateDir, tunnelManager: mgr },
+      );
+      expect(r.ok).toBe(true);
+      expect(r.change_id).toBeDefined();
+      expect(r.review_url).toBeUndefined();
+    } finally {
+      await mgr.close();
+    }
+  });
+});
