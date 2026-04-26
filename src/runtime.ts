@@ -11,7 +11,7 @@
 // The actual vault apply still goes through `kernel.apply` / `pending apply`,
 // which lives outside the channel surface.
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { sha256 } from './core/hash.ts';
@@ -466,4 +466,76 @@ export async function applyForOwner(
     if (!r.ok) lines.push(`  ✗ ${r.op} ${r.path} — ${r.error ?? ''}`);
   }
   return { ok: false, change_id: changeId, rendered: lines.join('\n'), error: result.error };
+}
+
+// ── rebase ────────────────────────────────────────────────────────────────
+//
+// rebasePlan re-runs the ingest pipeline against the source the original
+// plan was generated from, picking up current vault state. It deletes the
+// old plan from pending and saves a fresh one. Honest-scope alternative to
+// 3-way merge: for ops with patch.type='replace' (the only supported type
+// in v0.1), surgically merging the agent's body against a drifted base is
+// more error-prone than letting the agent (or mock) recompute against the
+// new base. Source must have a stable on-disk location (set by
+// ingestFromChannel as plan.source_path).
+
+export interface RebaseOptions {
+  vaultRoot: string;
+  agent?: 'mock' | 'claude';
+  hearthStateDir?: string;
+  adapterOverride?: AgentAdapter;
+}
+
+export interface RebaseResult {
+  ok: boolean;
+  change_id?: string;
+  /** Same prose summary shape as ChannelIngestResult for surface reuse. */
+  summary: string;
+  error?: string;
+}
+
+export async function rebasePlan(oldChangeId: string, opts: RebaseOptions): Promise<RebaseResult> {
+  const stateDir = opts.hearthStateDir ?? defaultStateDir();
+  const store = new PendingStore(join(stateDir, 'pending'));
+  let oldPlan: ChangePlan;
+  try { oldPlan = store.load(oldChangeId); }
+  catch (e) {
+    return { ok: false, summary: `pending plan not found: ${oldChangeId}`, error: (e as Error).message };
+  }
+  if (!oldPlan.source_path) {
+    return { ok: false, summary: `plan ${oldChangeId} has no source_path; cannot rebase`,
+             error: `source_path missing on plan ${oldChangeId}` };
+  }
+  if (!existsSync(oldPlan.source_path)) {
+    return { ok: false, summary: `source file gone: ${oldPlan.source_path}`,
+             error: `source file no longer at ${oldPlan.source_path}` };
+  }
+
+  // The materialized source file has YAML frontmatter we added in
+  // materializeInbound. Strip it to recover the original body — the
+  // pipeline will re-frontmatter on the new ingest.
+  const content = readFileSync(oldPlan.source_path, 'utf8');
+  let text = content;
+  if (content.startsWith('---\n')) {
+    const end = content.indexOf('\n---\n', 4);
+    if (end > 0) text = content.slice(end + 5).trim();
+  }
+
+  // Synthetic message_id so we don't collide with the original.
+  const r = await ingestFromChannel(
+    { channel: 'rebase', message_id: `${oldChangeId}-r${Date.now()}`,
+      from: 'rebase', text, received_at: new Date().toISOString() },
+    { vaultRoot: opts.vaultRoot, agent: opts.agent ?? 'mock',
+      hearthStateDir: stateDir, adapterOverride: opts.adapterOverride },
+  );
+  if (!r.ok) {
+    return { ok: false, summary: `rebase ingest failed: ${r.summary}`, error: r.error };
+  }
+  store.remove(oldChangeId);
+  void audit(opts.vaultRoot, {
+    event: 'changeplan.created',
+    initiated_by: 'rebase',
+    data: { from_change_id: oldChangeId, change_id: r.change_id },
+  });
+  return { ok: true, change_id: r.change_id, summary: `rebased ${oldChangeId} → ${r.change_id}` };
 }
