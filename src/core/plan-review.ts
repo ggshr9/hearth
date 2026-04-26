@@ -4,10 +4,10 @@
 // future Local Console) renders from this single representation. No surface
 // computes its own diff or risk; they all read PlanReview.
 
-import type { ChangePlan, ChangeOp, Risk } from './types.ts';
+import type { ChangePlan, ChangeOpKind, Risk } from './types.ts';
 
 export interface PlanReviewOp {
-  kind: ChangeOp['op'];
+  kind: ChangeOpKind;
   path: string;
   reason: string;
   /** Current file content for `update`; null for `create` and `delete`. */
@@ -41,15 +41,11 @@ export interface RenderOptions {
   capabilityBase?: string;
 }
 
-export interface RenderResult {
-  format: RenderFormat;
-  /** Plain-text rendering: ANSI is text with escape codes; markdown is text. */
-  text?: string;
-  /** Server-renderable HTML document (full page) for `format: 'html'`. */
-  html?: string;
-  /** Structural JSON for programmatic consumers. */
-  json?: PlanReview;
-}
+export type RenderResult =
+  | { format: 'json';      json: PlanReview }
+  | { format: 'markdown';  text: string }
+  | { format: 'ansi';      text: string }
+  | { format: 'html';      html: string };
 
 function toPlanReview(plan: ChangePlan): PlanReview {
   return {

@@ -1,4 +1,10 @@
-// PlanReview canonical render layer — JSON format + structure tests.
+// PlanReview canonical render layer — all-formats unification test
+//
+// Load-bearing property: every user-facing surface (CLI, HTTP, channel,
+// future Local Console) renders from one place. If you delete these tests
+// you lose the contract that all render layers are unified at the source.
+// Tasks 2-4 each add a format arm; this test ensures only JSON works until
+// then, and asserts the unimplemented formats throw.
 
 import { describe, expect, it } from 'vitest';
 import type { ChangePlan } from '../src/core/types.ts';
@@ -27,8 +33,8 @@ describe('renderPlanReview JSON', () => {
   it('returns the canonical PlanReview structure under format="json"', () => {
     const out = renderPlanReview(PLAN, { format: 'json' });
     expect(out.format).toBe('json');
-    expect(out.json).toBeDefined();
-    const review = out.json!;
+    if (out.format !== 'json') throw new Error('expected json format');
+    const review = out.json;
     expect(review.change_id).toBe('cp-001');
     expect(review.risk).toBe('medium');
     expect(review.requires_review).toBe(true);
@@ -40,9 +46,18 @@ describe('renderPlanReview JSON', () => {
 
   it('PlanReview ops carry diff hints (current/proposed bodies for create)', () => {
     const out = renderPlanReview(PLAN, { format: 'json' });
-    const op0 = out.json!.ops[0]!;
+    if (out.format !== 'json') throw new Error('expected json format');
+    const op0 = out.json.ops[0]!;
     expect(op0.kind).toBe('create');
     expect(op0.before).toBeNull();
     expect(op0.after).toBe('# Hello\n\nbody\n');
+  });
+});
+
+describe('renderPlanReview unimplemented formats', () => {
+  it('throws for markdown / html / ansi (Tasks 2-4 land each format)', () => {
+    expect(() => renderPlanReview(PLAN, { format: 'markdown' })).toThrow(/not implemented/);
+    expect(() => renderPlanReview(PLAN, { format: 'html' })).toThrow(/not implemented/);
+    expect(() => renderPlanReview(PLAN, { format: 'ansi' })).toThrow(/not implemented/);
   });
 });
