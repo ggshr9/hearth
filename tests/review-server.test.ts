@@ -83,4 +83,19 @@ describe('review-server: GET /p/:id', () => {
     expect((await fetch(u)).status).toBe(200);
     expect((await fetch(u)).status).toBe(200);
   });
+
+  it('STALE_TOKEN page HTML-escapes the reason string', async () => {
+    const vault = makeVault();
+    const stateDir = makeStateDir();
+    handle = startReviewServer({ port: 0, vaultRoot: vault, hearthStateDir: stateDir });
+    // We can't directly inject an evil reason, but we can verify the
+    // escaping pipeline by submitting a malformed token and checking that
+    // the page never contains a raw '<' from any source. Belt-and-braces
+    // protection against future code paths that might pipe user input
+    // into the reason.
+    const res = await fetch(`http://127.0.0.1:${handle.port}/p/anything?t=invalid.<script>`);
+    expect(res.status).toBe(403);
+    const body = await res.text();
+    expect(body).not.toContain('<script>');
+  });
 });

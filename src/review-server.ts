@@ -13,7 +13,7 @@
 
 import { join } from 'node:path';
 import { PendingStore } from './core/pending-store.ts';
-import { renderPlanReview } from './core/plan-review.ts';
+import { renderPlanReview, escapeHtml } from './core/plan-review.ts';
 import { verifyToken, TokenError } from './core/approval-token.ts';
 
 export interface ReviewServerOptions {
@@ -44,7 +44,7 @@ function staleTokenPage(reason: string): Response {
 </style></head>
 <body>
   <h1>hearth · STALE_TOKEN</h1>
-  <p>This link is no longer valid (<code>${reason}</code>).</p>
+  <p>This link is no longer valid (<code>${escapeHtml(reason)}</code>).</p>
   <p>Wait for the next pending notification — it will include a fresh link.</p>
 </body></html>`;
   return new Response(body, { status: 403, headers: { 'content-type': 'text/html; charset=utf-8' } });

@@ -130,7 +130,7 @@ function renderMarkdown(_plan: ChangePlan, review: PlanReview, opts: RenderOptio
   return lines.join('\n').trimEnd();
 }
 
-function escapeHtml(s: string): string {
+export function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
