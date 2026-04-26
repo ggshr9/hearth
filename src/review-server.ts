@@ -80,37 +80,24 @@ async function handleApply(
   if (!token) {
     return staleTokenPage('missing token');
   }
-  // Check token validity first (before loading plan) so we can detect consumed tokens
-  // even if the plan has been removed. This uses 'low' scope as a baseline; we'll
-  // re-verify with the actual required scope after loading the plan.
-  try {
-    verifyToken({ token, change_id: changeId, required_scope: 'low' });
-  } catch (e) {
-    await audit(opts.vaultRoot, {
-      event: 'approval_token.rejected',
-      initiated_by: 'review-server',
-      data: { change_id: changeId, reason: (e as Error).message },
-    });
-    return staleTokenPage((e as Error).message);
-  }
-  // Load plan to determine actual required scope
+  // Load plan to determine required scope
   let plan;
   try { plan = store.load(changeId); }
   catch { return errorPage(404, 'plan not found', `pending plan <code>${escapeHtml(changeId)}</code> not found`); }
   const requiredScope: Risk = classifyRisk(plan);
-  // Verify and consume token with actual required scope
+  // Verify and consume token
   let payload;
   try {
     payload = verifyAndConsume({ token, change_id: changeId, required_scope: requiredScope });
   } catch (e) {
-    await audit(opts.vaultRoot, {
+    void audit(opts.vaultRoot, {
       event: 'approval_token.rejected',
       initiated_by: 'review-server',
       data: { change_id: changeId, reason: (e as Error).message },
     });
     return staleTokenPage((e as Error).message);
   }
-  await audit(opts.vaultRoot, {
+  void audit(opts.vaultRoot, {
     event: 'approval_token.consumed',
     initiated_by: 'review-server',
     data: { change_id: changeId, jti: payload.jti },
@@ -126,14 +113,14 @@ async function handleApply(
   const result = kernel.apply(plan);
   if (result.ok) {
     store.remove(changeId);
-    await audit(opts.vaultRoot, {
+    void audit(opts.vaultRoot, {
       event: 'changeplan.applied',
       initiated_by: 'review-server',
       data: { change_id: changeId, ops: result.ops.length },
     });
     return successPage(`applied <code>${escapeHtml(changeId)}</code> — ${result.ops.length} op${result.ops.length === 1 ? '' : 's'} written.`);
   }
-  await audit(opts.vaultRoot, {
+  void audit(opts.vaultRoot, {
     event: 'changeplan.rejected',
     initiated_by: 'review-server',
     data: { change_id: changeId, error: result.error },
