@@ -7,7 +7,7 @@
 //      are new entry points, not new bypasses.
 
 import { describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ingestFromChannel } from '../src/runtime.ts';
@@ -156,5 +156,21 @@ describe('v0.3.0 channel runtime: ingestFromChannel', () => {
     const staged = readFileSync(result.source_path!, 'utf8');
     expect(staged).toContain('url: "https://www.bilibili.com/video/BVfake"');
     expect(staged).toContain('Shared URL (not fetched in v0.3)');
+  });
+
+  it('plan.source_path points at the materialized channel-inbox file', async () => {
+    const vault = makeVault();
+    const stateDir = makeStateDir();
+    const r = await ingestFromChannel(
+      { channel: 'cli', message_id: 'm-srcpath-1', from: 'me',
+        text: 'first thought', received_at: new Date().toISOString() },
+      { vaultRoot: vault, agent: 'mock', hearthStateDir: stateDir },
+    );
+    expect(r.ok).toBe(true);
+    const store = new PendingStore(`${stateDir}/pending`);
+    const plan = store.load(r.change_id!);
+    expect(plan.source_path).toBeDefined();
+    expect(existsSync(plan.source_path!)).toBe(true);
+    expect(plan.source_path).toContain('m-srcpath-1');
   });
 });

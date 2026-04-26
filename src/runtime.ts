@@ -182,6 +182,7 @@ export async function ingestFromChannel(
 
   // Pin source_id to the materialized source's hash.
   plan.source_id = sourceId;
+  plan.source_path = sourcePath;
 
   // 6. Save to pending. Vault stays untouched.
   const store = opts.pendingStoreOverride ?? new PendingStore(join(stateDir, 'pending'));

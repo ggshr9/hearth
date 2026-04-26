@@ -80,6 +80,10 @@ export interface ChangeOp {
 export interface ChangePlan {
   change_id: string;
   source_id: string;
+  /** Absolute path to the materialized source file (set by ingest pipelines
+   *  that have a stable source location, e.g. ingestFromChannel). Used by
+   *  rebasePlan to re-run ingest against current vault state. */
+  source_path?: string;
   risk: Risk;
   ops: ChangeOp[];
   requires_review: boolean;
