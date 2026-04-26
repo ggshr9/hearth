@@ -120,6 +120,7 @@ Channels (consumable, swappable)
 - [`docs/SECURITY.md`](./docs/SECURITY.md) — threat model + the three trust pillars
 - [`docs/why.md`](./docs/why.md) — pattern background + design discipline
 - [`docs/INTEGRATIONS.md`](./docs/INTEGRATIONS.md) — copy-paste MCP config for Claude Code / Cursor / Codex / Continue.dev
+- [`docs/RESEARCH-AGENT.md`](./docs/RESEARCH-AGENT.md) — design note for proactive long-running research agents (Path 1 today, `hearth watch` later)
 
 ## Status
 

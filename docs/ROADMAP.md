@@ -212,7 +212,7 @@ attention on each capture.
 
 ---
 
-## v0.6 — Views before Moves
+## v0.6 — Views before Moves + research watch
 
 ```
 07 Hearth Proposals/ staging dir
@@ -221,6 +221,14 @@ suggested merges
 restructure proposals
 proposal expiration (expires_at frontmatter)
 proposal dependency drift detection
+
+hearth watch subsystem (see docs/RESEARCH-AGENT.md):
+  - watch.yaml config
+  - hearth watch list / add / remove / run
+  - cron-driven research agent execution
+  - per-watch token budget + cap_per_run + relevance_threshold
+  - vault-side dedupe via vault_search before propose
+  - daily/weekly digest pushed to notify_channel
 ```
 
 **Done when**: a vault that has accumulated 200 messy notes can be browsed
