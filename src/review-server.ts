@@ -14,7 +14,12 @@
 import { join } from 'node:path';
 import { PendingStore } from './core/pending-store.ts';
 import { renderPlanReview, escapeHtml } from './core/plan-review.ts';
-import { verifyToken, TokenError } from './core/approval-token.ts';
+import { verifyToken, verifyAndConsume, TokenError } from './core/approval-token.ts';
+import { loadSchema, SchemaError } from './core/schema.ts';
+import { createKernel } from './core/vault-kernel.ts';
+import { audit } from './core/audit.ts';
+import { classifyRisk } from './core/risk-classifier.ts';
+import type { Risk } from './core/types.ts';
 
 export interface ReviewServerOptions {
   /** 0 = OS-assigned ephemeral port. */
@@ -50,6 +55,92 @@ function staleTokenPage(reason: string): Response {
   return new Response(body, { status: 403, headers: { 'content-type': 'text/html; charset=utf-8' } });
 }
 
+function successPage(message: string): Response {
+  const body = `<!doctype html>
+<html><head><meta charset="utf-8"><title>hearth · ok</title>
+<style>body{font-family:-apple-system,sans-serif;max-width:560px;margin:4rem auto;padding:0 1.25rem;color:#1c1c1e}h1{font-size:1.125rem;font-weight:600}p{color:#666}</style>
+</head><body><h1>hearth</h1><p>${message}</p></body></html>`;
+  return new Response(body, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } });
+}
+
+function errorPage(status: number, title: string, detail: string): Response {
+  const body = `<!doctype html>
+<html><head><meta charset="utf-8"><title>hearth · ${escapeHtml(title)}</title>
+<style>body{font-family:-apple-system,sans-serif;max-width:560px;margin:4rem auto;padding:0 1.25rem;color:#1c1c1e}h1{font-size:1.125rem;font-weight:600}p{color:#666}code{font-family:ui-monospace,Menlo,monospace;font-size:.875em;background:#f0f0f0;padding:0 .2em;border-radius:2px}</style>
+</head><body><h1>hearth · ${escapeHtml(title)}</h1><p>${detail}</p></body></html>`;
+  return new Response(body, { status, headers: { 'content-type': 'text/html; charset=utf-8' } });
+}
+
+async function handleApply(
+  opts: ReviewServerOptions,
+  store: PendingStore,
+  changeId: string,
+  token: string,
+): Promise<Response> {
+  if (!token) {
+    return staleTokenPage('missing token');
+  }
+  // Check token validity first (before loading plan) so we can detect consumed tokens
+  // even if the plan has been removed. This uses 'low' scope as a baseline; we'll
+  // re-verify with the actual required scope after loading the plan.
+  try {
+    verifyToken({ token, change_id: changeId, required_scope: 'low' });
+  } catch (e) {
+    await audit(opts.vaultRoot, {
+      event: 'approval_token.rejected',
+      initiated_by: 'review-server',
+      data: { change_id: changeId, reason: (e as Error).message },
+    });
+    return staleTokenPage((e as Error).message);
+  }
+  // Load plan to determine actual required scope
+  let plan;
+  try { plan = store.load(changeId); }
+  catch { return errorPage(404, 'plan not found', `pending plan <code>${escapeHtml(changeId)}</code> not found`); }
+  const requiredScope: Risk = classifyRisk(plan);
+  // Verify and consume token with actual required scope
+  let payload;
+  try {
+    payload = verifyAndConsume({ token, change_id: changeId, required_scope: requiredScope });
+  } catch (e) {
+    await audit(opts.vaultRoot, {
+      event: 'approval_token.rejected',
+      initiated_by: 'review-server',
+      data: { change_id: changeId, reason: (e as Error).message },
+    });
+    return staleTokenPage((e as Error).message);
+  }
+  await audit(opts.vaultRoot, {
+    event: 'approval_token.consumed',
+    initiated_by: 'review-server',
+    data: { change_id: changeId, jti: payload.jti },
+  });
+  // Load schema and apply
+  let schema;
+  try { schema = loadSchema(opts.vaultRoot); }
+  catch (e) {
+    if (e instanceof SchemaError) return errorPage(500, 'no SCHEMA.md', escapeHtml(e.message));
+    throw e;
+  }
+  const kernel = createKernel(opts.vaultRoot, schema);
+  const result = kernel.apply(plan);
+  if (result.ok) {
+    store.remove(changeId);
+    await audit(opts.vaultRoot, {
+      event: 'changeplan.applied',
+      initiated_by: 'review-server',
+      data: { change_id: changeId, ops: result.ops.length },
+    });
+    return successPage(`applied <code>${escapeHtml(changeId)}</code> — ${result.ops.length} op${result.ops.length === 1 ? '' : 's'} written.`);
+  }
+  await audit(opts.vaultRoot, {
+    event: 'changeplan.rejected',
+    initiated_by: 'review-server',
+    data: { change_id: changeId, error: result.error },
+  });
+  return errorPage(409, 'apply failed', escapeHtml(result.error ?? 'kernel rejected'));
+}
+
 export function startReviewServer(opts: ReviewServerOptions): ReviewServerHandle {
   const stateDir = opts.hearthStateDir;
   const store = new PendingStore(stateDir ? join(stateDir, 'pending') : undefined);
@@ -81,8 +172,14 @@ export function startReviewServer(opts: ReviewServerOptions): ReviewServerHandle
         if (out.format !== 'html') throw new Error('renderPlanReview did not return html');
         return new Response(out.html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
       }
-      // POST routes land in later tasks (Tasks 10 + 11)
-      return new Response('not implemented yet', { status: 501 });
+      if (req.method === 'POST' && action === 'apply') {
+        return handleApply(opts, store, changeId!, token);
+      }
+      if (req.method === 'POST' && action === 'reject') {
+        // Task 11
+        return new Response('not implemented yet', { status: 501 });
+      }
+      return new Response('not found', { status: 404 });
     },
   });
 
