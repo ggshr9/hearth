@@ -7,12 +7,17 @@
 // (returns change_id so the caller can deep-link the user to review).
 
 import { describe, expect, it, afterEach } from 'vitest';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { issueCaptureToken } from '../src/core/capture-token.ts';
 import { issueToken as issueApprovalToken } from '../src/core/approval-token.ts';
 import { startReviewServer, type ReviewServerHandle } from '../src/review-server.ts';
+import { PendingStore } from '../src/core/pending-store.ts';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const FAKE_YTDL = resolve(__dirname, 'fixtures', 'yt-fake.sh');
 
 const SCHEMA = `---
 type: meta
@@ -134,6 +139,59 @@ describe('review-server: POST /ingest', () => {
       body: '{not json',
     });
     expect(res.status).toBe(400);
+  });
+
+  it('enriches YouTube URL captures with the auto-subtitle transcript', async () => {
+    const vault = makeVault();
+    const stateDir = makeStateDir();
+    const { token } = issueCaptureToken({ issued_by: 'test' });
+    process.env.HEARTH_YTDL_BINARY = FAKE_YTDL;
+    handle = startReviewServer({ port: 0, vaultRoot: vault, hearthStateDir: stateDir });
+    try {
+      const res = await fetch(`http://127.0.0.1:${handle.port}/ingest?t=${encodeURIComponent(token)}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' }),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json() as { ok: boolean; change_id?: string };
+      expect(body.ok).toBe(true);
+      // The materialized source should contain the fetched transcript
+      // (title + timestamped lines), not just the bare URL.
+      const sourcePath = join(stateDir, 'channel-inbox', 'capture');
+      const files = await import('node:fs').then(m => m.readdirSync(sourcePath));
+      expect(files.length).toBeGreaterThan(0);
+      const sourceFile = readFileSync(join(sourcePath, files[0]!), 'utf8');
+      expect(sourceFile).toContain('Never Gonna Give You Up');
+      expect(sourceFile).toContain('[00:00:00]');
+    } finally {
+      delete process.env.HEARTH_YTDL_BINARY;
+    }
+  });
+
+  it('falls back to URL-only ingest when YouTube fetch fails', async () => {
+    const vault = makeVault();
+    const stateDir = makeStateDir();
+    const { token } = issueCaptureToken({ issued_by: 'test' });
+    // Point at a binary that doesn't exist — fetcher returns null, ingest still succeeds.
+    process.env.HEARTH_YTDL_BINARY = '/nonexistent/yt-dlp-not-here';
+    handle = startReviewServer({ port: 0, vaultRoot: vault, hearthStateDir: stateDir });
+    try {
+      const res = await fetch(`http://127.0.0.1:${handle.port}/ingest?t=${encodeURIComponent(token)}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: 'https://www.youtube.com/watch?v=abc', title: 'fallback test' }),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json() as { ok: boolean; change_id?: string };
+      expect(body.ok).toBe(true);
+      // Plan still got created — vault is healthy.
+      const store = new PendingStore(join(stateDir, 'pending'));
+      const plan = store.load(body.change_id!);
+      expect(plan.ops.length).toBeGreaterThan(0);
+    } finally {
+      delete process.env.HEARTH_YTDL_BINARY;
+    }
   });
 
   it('a capture token works for many ingests (NOT single-use)', async () => {

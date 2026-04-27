@@ -20,6 +20,7 @@ import { createKernel } from './core/vault-kernel.ts';
 import { audit } from './core/audit.ts';
 import { classifyRisk } from './core/risk-classifier.ts';
 import { ingestFromChannel, type InboundMsg } from './runtime.ts';
+import { fetchYouTubeTranscript, isYouTubeUrl } from './ingest/url-fetchers/youtube.ts';
 import type { Risk } from './core/types.ts';
 import type { AgentAdapter } from './core/agent-adapter.ts';
 
@@ -235,10 +236,20 @@ async function handleIngest(
     return jsonResponse({ ok: false, error: 'url or text required' }, 400);
   }
 
+  // Enrich URL captures with their content where we have a fetcher.
+  // YouTube: pull auto-subs via yt-dlp into a markdown transcript so the
+  // agent has actual material to summarize, not just the bare URL.
+  // Non-fatal: if yt-dlp is missing or the fetch fails, fall back to URL.
+  let enrichedText: string | undefined;
+  if (url && isYouTubeUrl(url)) {
+    const fetched = await fetchYouTubeTranscript(url, { binary: process.env.HEARTH_YTDL_BINARY });
+    if (fetched) enrichedText = fetched.markdown;
+  }
+
   // Synthesize an InboundMsg. The capture surface name (if the token had
   // one) becomes `from` for traceability in the audit log.
   const messageId = `cap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const composedText = [title, text].filter(Boolean).join('\n\n');
+  const composedText = [enrichedText, title, text].filter(Boolean).join('\n\n');
   const msg: InboundMsg = {
     channel: 'capture',
     message_id: messageId,
