@@ -28,6 +28,7 @@ import { TunnelManager } from '../tunnel-manager.ts';
 import { startStdioServer } from '../mcp-server.ts';
 import { audit, readAudit, parseSince } from '../core/audit.ts';
 import { issueToken } from '../core/approval-token.ts';
+import { issueCaptureToken } from '../core/capture-token.ts';
 import { runSetup } from './setup.ts';
 
 function fail(msg: string): never {
@@ -391,6 +392,41 @@ async function cmdSetup(_positionals: string[], _values: Record<string, string |
   process.exit(code);
 }
 
+function cmdCapture(positionals: string[], values: Record<string, string | boolean | undefined>): void {
+  const sub = positionals[0];
+  if (sub !== 'issue') fail(`capture: unknown subcommand "${sub}". expected: issue`);
+  const ttlDays = values.ttl ? parseInt(values.ttl as string, 10) : 30;
+  if (Number.isNaN(ttlDays) || ttlDays <= 0) fail('capture issue: --ttl must be a positive integer (days)');
+  const name = (values.name as string) ?? 'unnamed';
+
+  const { token, payload } = issueCaptureToken({ issued_by: 'cli:capture', ttl_days: ttlDays, name });
+  process.stdout.write(`token:    ${token}\n`);
+  process.stdout.write(`name:     ${payload.name ?? '(none)'}\n`);
+  process.stdout.write(`issued:   ${payload.iat}\n`);
+  process.stdout.write(`expires:  ${payload.exp}  (${ttlDays} days)\n`);
+  process.stdout.write(`\n`);
+  process.stdout.write(`Configure your capture surface (iOS Shortcut / Telegram bot / bookmarklet)\n`);
+  process.stdout.write(`to POST JSON to /ingest with this token in the t= query parameter.\n`);
+  process.stdout.write(`\n`);
+  process.stdout.write(`Example with curl (replace <tunnel> with your hearth review start URL):\n`);
+  process.stdout.write(`  curl -X POST '<tunnel>/ingest?t=${token.slice(0, 12)}…' \\\n`);
+  process.stdout.write(`       -H 'content-type: application/json' \\\n`);
+  process.stdout.write(`       -d '{"url":"https://example.com","title":"hello"}'\n`);
+  process.stdout.write(`\n`);
+  process.stdout.write(`iOS Shortcut recipe:\n`);
+  process.stdout.write(`  1. New Shortcut, named "Send to hearth"\n`);
+  process.stdout.write(`  2. Receive: URLs (via Share Sheet)\n`);
+  process.stdout.write(`  3. Action "Get Contents of URL":\n`);
+  process.stdout.write(`     URL:    <your hearth review start tunnel URL>/ingest?t=${token.slice(0, 12)}…\n`);
+  process.stdout.write(`     Method: POST\n`);
+  process.stdout.write(`     Body:   JSON  { "url": <Shortcut Input>, "title": <Page Name> }\n`);
+  process.stdout.write(`  4. Action "Show Result" → display response\n`);
+  process.stdout.write(`\n`);
+  process.stdout.write(`Note: capture tokens are reusable (NOT single-use); one token authorizes\n`);
+  process.stdout.write(`many captures over its TTL. Keep it private — leak = adversary can flood\n`);
+  process.stdout.write(`your pending queue (vault is still safe; apply still requires approval).\n`);
+}
+
 async function cmdReview(positionals: string[], values: Record<string, string | boolean | undefined>): Promise<void> {
   const sub = positionals[0];
   if (sub !== 'start') fail(`review: unknown subcommand "${sub}". expected: start`);
@@ -432,6 +468,7 @@ usage:
   hearth pending apply <change_id> [--vault <dir>]
   hearth pending share <change_id>                share plan for mobile review (issues URL token)
   hearth review start [--vault <dir>]             start mobile review surface (review-server + tunnel)
+  hearth capture issue [--name "iphone"] [--ttl 30]  mint long-lived capture token for /ingest
   hearth query "<question>" [--vault <dir>]
   hearth lint [--vault <dir>]
   hearth channel ingest --channel <name> --message-id <id> --from <id> --text "..." [--vault <dir>] [--agent mock|claude]
@@ -468,6 +505,8 @@ async function main(): Promise<void> {
       since: { type: 'string' },
       limit: { type: 'string' },
       'state-dir': { type: 'string' },
+      ttl: { type: 'string' },
+      name: { type: 'string' },
     },
     allowPositionals: true,
     strict: false,
@@ -484,6 +523,7 @@ async function main(): Promise<void> {
     case 'mcp': return await cmdMcp(positionals, values);
     case 'log': return cmdLog(positionals, values);
     case 'review': return await cmdReview(positionals, values);
+    case 'capture': return cmdCapture(positionals, values);
     case 'setup': return await cmdSetup(positionals, values);
     case 'help': return help();
     default: fail(`unknown command: ${cmd}. run "hearth help"`);
