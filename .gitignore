@@ -11,3 +11,7 @@ coverage/
 *.tsbuildinfo
 .vitest-temp/
 .tmp/
+
+# Playwright MCP scratch + acceptance screenshots
+.playwright-mcp/
+acceptance-*.png

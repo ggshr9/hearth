@@ -4,26 +4,27 @@
 // without a token issued by a human-direct surface (CLI / wechat-cc /
 // future Local Console). This makes apply NOT a silent agent capability.
 //
-// Token format: HMAC-SHA256(secret, "<change_id>|<expires_at>|<scope>") +
-// the same payload, base64url-encoded as "payload.sig".
-//
-// Properties:
+// Token envelope is shared with capture-token.ts — see token-crypto.ts.
+// What's specific to approval tokens:
 //   - Single-use: kernel records consumed token IDs in a deque file
 //   - Expires: default 5 min; configurable per issuance
 //   - Scoped: bound to one specific change_id
 //   - Risk-class aware: high-risk ops require explicit `high` scope
-//   - Not network-transmitted: tokens stay on the user's machine
+//   - capability discriminator: 'approval' (rejects cross-type tokens)
 
-import { createHmac, randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { existsSync, readFileSync, mkdirSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { signPayload, decodeAndVerify } from './token-crypto.ts';
 
 export type Risk = 'low' | 'medium' | 'high';
 
 export interface TokenPayload {
   /** Random per-token ID; used to enforce single-use. */
   jti: string;
+  /** Discriminator that prevents cross-type confusion with capture tokens. */
+  capability?: 'approval';
   /** ChangePlan this token authorizes. */
   change_id: string;
   /** Highest risk class the kernel should accept under this token. */
@@ -43,28 +44,8 @@ export interface IssuedToken {
   payload: TokenPayload;
 }
 
-const SECRET_PATH = join(homedir(), '.hearth', 'secret.key');
 const CONSUMED_PATH = join(homedir(), '.hearth', 'consumed-tokens.log');
 const DEFAULT_EXPIRY_MS = 5 * 60 * 1000;
-
-/** Lazily generate a per-installation HMAC secret. chmod 600. */
-function loadOrCreateSecret(): Buffer {
-  mkdirSync(join(homedir(), '.hearth'), { recursive: true, mode: 0o700 });
-  if (!existsSync(SECRET_PATH)) {
-    const secret = randomBytes(32);
-    writeFileSync(SECRET_PATH, secret, { mode: 0o600 });
-  }
-  return readFileSync(SECRET_PATH);
-}
-
-function b64url(buf: Buffer): string {
-  return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-function b64urlDecode(s: string): Buffer {
-  const pad = '='.repeat((4 - (s.length % 4)) % 4);
-  return Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/') + pad, 'base64');
-}
 
 /** Issue a token. Called by human-surface code (CLI / channel adapter). */
 export function issueToken(args: {
@@ -75,20 +56,18 @@ export function issueToken(args: {
 }): IssuedToken {
   const payload: TokenPayload = {
     jti: randomBytes(8).toString('hex'),
+    capability: 'approval',
     change_id: args.change_id,
     scope: args.scope ?? 'low',
     iat: new Date().toISOString(),
     exp: new Date(Date.now() + (args.expires_in_ms ?? DEFAULT_EXPIRY_MS)).toISOString(),
     issued_by: args.issued_by,
   };
-  const payloadJson = JSON.stringify(payload);
-  const sig = createHmac('sha256', loadOrCreateSecret()).update(payloadJson).digest();
-  const token = `${b64url(Buffer.from(payloadJson))}.${b64url(sig)}`;
-  return { token, payload };
+  return { token: signPayload(payload), payload };
 }
 
 export class TokenError extends Error {
-  constructor(public readonly reason: 'malformed' | 'invalid_sig' | 'expired' | 'consumed' | 'wrong_change_id' | 'insufficient_scope') {
+  constructor(public readonly reason: 'malformed' | 'invalid_sig' | 'expired' | 'consumed' | 'wrong_change_id' | 'insufficient_scope' | 'wrong_capability') {
     super(`token rejected: ${reason}`);
     this.name = 'TokenError';
   }
@@ -134,22 +113,21 @@ function verifyCore(args: {
   change_id: string;
   required_scope: Risk;
 }): TokenPayload {
-  const parts = args.token.split('.');
-  if (parts.length !== 2) throw new TokenError('malformed');
-  const [payloadB64, sigB64] = parts;
   let payload: TokenPayload;
   try {
-    payload = JSON.parse(b64urlDecode(payloadB64!).toString('utf8')) as TokenPayload;
-  } catch {
-    throw new TokenError('malformed');
+    payload = decodeAndVerify(args.token) as TokenPayload;
+  } catch (e) {
+    const msg = (e as Error).message;
+    if (msg.startsWith('malformed')) throw new TokenError('malformed');
+    throw new TokenError('invalid_sig');
   }
 
-  // Verify HMAC
-  const payloadJson = JSON.stringify(payload);
-  const expectedSig = createHmac('sha256', loadOrCreateSecret()).update(payloadJson).digest();
-  const givenSig = b64urlDecode(sigB64!);
-  if (expectedSig.length !== givenSig.length || !timingSafeEqual(expectedSig, givenSig)) {
-    throw new TokenError('invalid_sig');
+  // Capability discriminator — reject capture/other tokens. Older approval
+  // tokens issued before the discriminator existed lack this field; treat
+  // missing as approval-grade for backward compatibility within the same
+  // installation.
+  if (payload.capability !== undefined && payload.capability !== 'approval') {
+    throw new TokenError('wrong_capability');
   }
 
   // Expiry
@@ -168,12 +146,4 @@ function verifyCore(args: {
   if (isConsumed(payload.jti)) throw new TokenError('consumed');
 
   return payload;
-}
-
-/** Constant-time equality to prevent HMAC timing attacks. */
-function timingSafeEqual(a: Buffer, b: Buffer): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= (a[i]! ^ b[i]!);
-  return diff === 0;
 }
