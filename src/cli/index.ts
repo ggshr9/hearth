@@ -433,17 +433,34 @@ async function cmdReview(positionals: string[], values: Record<string, string | 
   const vault = resolve((values.vault as string) ?? process.cwd());
   const stateDir = (values['state-dir'] as string) ?? undefined;
 
-  const server = startReviewServer({ port: 0, vaultRoot: vault, hearthStateDir: stateDir });
-  const mgr = new TunnelManager({
+  // Env-driven knobs for server deploy:
+  //   HEARTH_NO_TUNNEL=1   skip cloudflared (use when fronted by Tailscale,
+  //                         a VPN, or any other reachability layer)
+  //   HEARTH_PORT=N        pin the listen port (default 0 = ephemeral)
+  //   HEARTH_BIND=ADDR     hostname to bind (default 127.0.0.1)
+  const noTunnel = process.env.HEARTH_NO_TUNNEL === '1';
+  const port = process.env.HEARTH_PORT ? parseInt(process.env.HEARTH_PORT, 10) : 0;
+  const bind = process.env.HEARTH_BIND;
+  if (process.env.HEARTH_PORT && (Number.isNaN(port) || port < 0 || port > 65535)) {
+    fail(`HEARTH_PORT must be a valid port number, got "${process.env.HEARTH_PORT}"`);
+  }
+
+  const server = startReviewServer({ port, bind, vaultRoot: vault, hearthStateDir: stateDir });
+  process.stdout.write(`local server: http://${bind ?? '127.0.0.1'}:${server.port}\n`);
+  process.stdout.write(`vault: ${vault}\n`);
+
+  const mgr = noTunnel ? null : new TunnelManager({
     binary: process.env.HEARTH_TUNNEL_BINARY,    // test seam
     localPort: server.port,
     idleCloseMs: 10 * 60_000,
   });
   try {
-    const url = await mgr.ensureUrl();
-    process.stdout.write(`${url}\n`);
-    process.stdout.write(`local server: http://127.0.0.1:${server.port}\n`);
-    process.stdout.write(`vault: ${vault}\n`);
+    if (mgr) {
+      const url = await mgr.ensureUrl();
+      process.stdout.write(`tunnel: ${url}\n`);
+    } else {
+      process.stdout.write(`tunnel: disabled (HEARTH_NO_TUNNEL=1)\n`);
+    }
     process.stdout.write(`stop with Ctrl-C\n`);
     // Keep alive until SIGINT
     await new Promise<void>(r => {
@@ -451,7 +468,7 @@ async function cmdReview(positionals: string[], values: Record<string, string | 
       process.on('SIGTERM', () => r());
     });
   } finally {
-    await mgr.close();
+    if (mgr) await mgr.close();
     server.stop();
   }
 }

@@ -29,6 +29,12 @@ export interface ReviewServerOptions {
   port: number;
   vaultRoot: string;
   hearthStateDir?: string;
+  /** Hostname to bind. Default '127.0.0.1'. Set to '0.0.0.0' (or a specific
+   *  interface IP, e.g. the tailnet IP) for tailnet-only deploys without
+   *  cloudflared. Note: binding to 0.0.0.0 on a host with a public interface
+   *  exposes the server publicly — use `tailscale serve` or a firewall to
+   *  scope it to your tailnet. */
+  bind?: string;
   /** Override the public base URL the page renders into form actions
    *  (when behind a tunnel, this is the *.trycloudflare.com URL). */
   publicBase?: string;
@@ -283,7 +289,7 @@ export function startReviewServer(opts: ReviewServerOptions): ReviewServerHandle
   const store = new PendingStore(stateDir ? join(stateDir, 'pending') : undefined);
 
   const server = Bun.serve({
-    hostname: '127.0.0.1',
+    hostname: opts.bind ?? '127.0.0.1',
     port: opts.port,
     fetch: async (req): Promise<Response> => {
       const url = new URL(req.url);

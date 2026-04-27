@@ -36,6 +36,33 @@ describe('CLI: hearth review start', () => {
   });
 });
 
+describe('CLI: hearth review start with HEARTH_NO_TUNNEL=1', () => {
+  it('skips cloudflared and reports tunnel: disabled', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'hearth-cli-noturn-'));
+    mkdirSync(join(vault, 'raw'), { recursive: true });
+    mkdirSync(join(vault, '06 Hearth Inbox'), { recursive: true });
+    writeFileSync(join(vault, 'SCHEMA.md'), SCHEMA);
+
+    proc = spawn('bun', [HEARTH, 'review', 'start', '--vault', vault], {
+      // Note: no HEARTH_TUNNEL_BINARY — if no-tunnel mode failed to skip,
+      // the spawn would attempt the real cloudflared and fail (or hang).
+      env: { ...process.env, HEARTH_NO_TUNNEL: '1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const out = await new Promise<string>((resolveP, reject) => {
+      const timer = setTimeout(() => reject(new Error('no startup output within 3s')), 3000);
+      let buf = '';
+      proc!.stdout!.on('data', (b: Buffer) => {
+        buf += b.toString();
+        if (buf.includes('tunnel: disabled')) { clearTimeout(timer); resolveP(buf); }
+      });
+    });
+    expect(out).toContain('tunnel: disabled (HEARTH_NO_TUNNEL=1)');
+    expect(out).toContain('local server: http://');
+    expect(out).not.toMatch(/trycloudflare\.com/);
+  });
+});
+
 describe('CLI: hearth pending share <id>', () => {
   it('prints a capability URL bound to the pending plan', async () => {
     const vault = mkdtempSync(join(tmpdir(), 'hearth-cli-share-'));
