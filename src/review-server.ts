@@ -1,25 +1,27 @@
-// review-server — local HTTP surface for capability-URL plan review.
+// review-server — local HTTP surface for capability-URL plan review and
+// external capture.
 //
-// localhost-only bind. Three routes (GET/POST/POST) all token-gated:
-//   GET  /p/:id?t=…       → render PlanReview HTML
-//   POST /p/:id/apply?t=… → kernel apply (consumes token)        [Task 10]
-//   POST /p/:id/reject?t=…→ mark rejected (consumes token)       [Task 11]
+// localhost-only bind. Routes:
+//   GET  /p/:id?t=…       → render PlanReview HTML        (approval token)
+//   POST /p/:id/apply?t=… → kernel apply, consumes token  (approval token)
+//   POST /p/:id/reject?t=…→ mark rejected, consumes token (approval token)
+//   POST /ingest?t=…      → accept inbound material       (capture token)
 //
 // The tunnel is the only path to this server from outside; the server
-// binds 127.0.0.1 and refuses cross-origin POSTs that don't carry a token.
-//
-// v1 implements GET + STALE_TOKEN handling. POST routes land in subsequent
-// tasks.
+// binds 127.0.0.1 and refuses requests that don't carry a token.
 
 import { join } from 'node:path';
 import { PendingStore } from './core/pending-store.ts';
 import { renderPlanReview, escapeHtml } from './core/plan-review.ts';
 import { verifyToken, verifyAndConsume, TokenError } from './core/approval-token.ts';
+import { verifyCaptureToken, CaptureTokenError } from './core/capture-token.ts';
 import { loadSchema, SchemaError } from './core/schema.ts';
 import { createKernel } from './core/vault-kernel.ts';
 import { audit } from './core/audit.ts';
 import { classifyRisk } from './core/risk-classifier.ts';
+import { ingestFromChannel, type InboundMsg } from './runtime.ts';
 import type { Risk } from './core/types.ts';
+import type { AgentAdapter } from './core/agent-adapter.ts';
 
 export interface ReviewServerOptions {
   /** 0 = OS-assigned ephemeral port. */
@@ -29,6 +31,14 @@ export interface ReviewServerOptions {
   /** Override the public base URL the page renders into form actions
    *  (when behind a tunnel, this is the *.trycloudflare.com URL). */
   publicBase?: string;
+  /** Which agent adapter /ingest should drive. Defaults to 'mock' so the
+   *  endpoint works without API keys; CLI sets 'claude' for real use. */
+  agent?: 'mock' | 'claude';
+  /** Optional adapter override (test seam — bypasses agent name). */
+  adapterOverride?: AgentAdapter;
+  /** When provided, /ingest forwards it so the resulting plan carries a
+   *  review_url on the active tunnel host. */
+  tunnelManager?: { ensureUrl(): Promise<string>; notePlanCount(n: number): void };
 }
 
 export interface ReviewServerHandle {
@@ -186,6 +196,77 @@ async function handleReject(
   return successPage(`rejected <code>${escapeHtml(changeId)}</code>.`);
 }
 
+interface IngestRequestBody {
+  url?: string;
+  title?: string;
+  text?: string;
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+  });
+}
+
+async function handleIngest(
+  opts: ReviewServerOptions,
+  req: Request,
+  token: string,
+): Promise<Response> {
+  // Capture-token gated. Tokens are long-lived + reusable; verifyCaptureToken
+  // does NOT consume.
+  let payload;
+  try {
+    payload = verifyCaptureToken(token);
+  } catch (e) {
+    return staleTokenPage(e instanceof CaptureTokenError ? e.reason : 'invalid');
+  }
+
+  let body: IngestRequestBody;
+  try {
+    body = await req.json() as IngestRequestBody;
+  } catch {
+    return jsonResponse({ ok: false, error: 'malformed JSON body' }, 400);
+  }
+
+  const { url, title, text } = body;
+  if (!url && !text) {
+    return jsonResponse({ ok: false, error: 'url or text required' }, 400);
+  }
+
+  // Synthesize an InboundMsg. The capture surface name (if the token had
+  // one) becomes `from` for traceability in the audit log.
+  const messageId = `cap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const composedText = [title, text].filter(Boolean).join('\n\n');
+  const msg: InboundMsg = {
+    channel: 'capture',
+    message_id: messageId,
+    from: payload.name ?? payload.issued_by ?? 'capture',
+    text: composedText || undefined,
+    url,
+    received_at: new Date().toISOString(),
+  };
+
+  const result = await ingestFromChannel(msg, {
+    vaultRoot: opts.vaultRoot,
+    agent: opts.agent ?? 'mock',
+    hearthStateDir: opts.hearthStateDir,
+    adapterOverride: opts.adapterOverride,
+    tunnelManager: opts.tunnelManager,
+  });
+
+  if (!result.ok) {
+    return jsonResponse({ ok: false, error: result.error ?? result.summary }, 422);
+  }
+  return jsonResponse({
+    ok: true,
+    change_id: result.change_id,
+    review_url: result.review_url,
+    summary: result.summary,
+  });
+}
+
 export function startReviewServer(opts: ReviewServerOptions): ReviewServerHandle {
   const stateDir = opts.hearthStateDir;
   const store = new PendingStore(stateDir ? join(stateDir, 'pending') : undefined);
@@ -193,12 +274,18 @@ export function startReviewServer(opts: ReviewServerOptions): ReviewServerHandle
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: opts.port,
-    fetch(req): Response | Promise<Response> {
+    fetch: async (req): Promise<Response> => {
       const url = new URL(req.url);
+      const token = url.searchParams.get('t') ?? '';
+
+      // /ingest is the capture endpoint — separate from /p/:id review URLs.
+      if (req.method === 'POST' && url.pathname === '/ingest') {
+        return handleIngest(opts, req, token);
+      }
+
       const m = PATH_RE.exec(url.pathname);
       if (!m) return new Response('not found', { status: 404 });
       const [, changeId, action] = m;
-      const token = url.searchParams.get('t') ?? '';
 
       if (req.method === 'GET' && !action) {
         try {
