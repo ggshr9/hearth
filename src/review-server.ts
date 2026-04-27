@@ -284,6 +284,128 @@ async function handleIngest(
   });
 }
 
+interface BulkRequestBody {
+  text?: string;
+}
+
+const BULK_URL_RE = /https?:\/\/[^\s<>"'`]+/g;
+
+function bulkPastePage(token: string): Response {
+  const tEnc = encodeURIComponent(token);
+  const body = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>hearth · bulk capture</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; max-width: 720px; margin: 2.5rem auto; padding: 0 1.25rem; line-height: 1.55; color: #1c1c1e; background: #fcfcfc; }
+  @media (prefers-color-scheme: dark) { body { color: #e5e5e7; background: #111; } textarea { background: #1c1c1e; color: #e5e5e7; border-color: #333; } }
+  h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 0.5rem; }
+  p { color: #666; margin: 0.5rem 0; font-size: 0.9375rem; }
+  textarea { width: 100%; min-height: 320px; padding: 0.75rem; font: 0.875rem ui-monospace, "SF Mono", Menlo, monospace; border: 1px solid #d0d0d0; border-radius: 3px; box-sizing: border-box; }
+  form.actions { margin: 1rem 0; }
+  button { font: inherit; padding: 0.5rem 1rem; border: 1px solid #2c7a3a; background: transparent; color: #2c7a3a; cursor: pointer; border-radius: 3px; }
+  @media (prefers-color-scheme: dark) { button { border-color: #6abc7a; color: #6abc7a; } }
+  button:hover { background: rgba(0,0,0,0.04); }
+</style>
+</head>
+<body>
+  <h1>hearth · bulk capture</h1>
+  <p>Paste any text — bookmark export, list of URLs, a chat dump, anything. hearth pulls out the http(s) URLs and queues one pending plan per URL.</p>
+  <form method="post" action="/bulk?t=${tEnc}" enctype="application/x-www-form-urlencoded">
+    <textarea name="text" placeholder="https://example.com/article&#10;https://www.youtube.com/watch?v=..."></textarea>
+    <div class="actions">
+      <button type="submit">queue all</button>
+    </div>
+  </form>
+</body>
+</html>`;
+  return new Response(body, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } });
+}
+
+function extractUrls(text: string): string[] {
+  const matches = text.match(BULK_URL_RE) ?? [];
+  // Trim trailing punctuation that's commonly adjacent to URLs in prose.
+  const cleaned = matches.map(u => u.replace(/[.,;:!?\)\]\}>]+$/, ''));
+  // De-duplicate, preserve order.
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const u of cleaned) {
+    if (!seen.has(u)) { seen.add(u); out.push(u); }
+  }
+  return out;
+}
+
+async function handleBulk(
+  opts: ReviewServerOptions,
+  req: Request,
+  token: string,
+): Promise<Response> {
+  let payload;
+  try {
+    payload = verifyCaptureToken(token);
+  } catch (e) {
+    return staleTokenPage(e instanceof CaptureTokenError ? e.reason : 'invalid');
+  }
+
+  // Accept JSON ({text}) OR form-encoded (text=...). The HTML paste page
+  // submits form-encoded; programmatic callers (scripts, scripts) use JSON.
+  let text: string | undefined;
+  const contentType = req.headers.get('content-type') ?? '';
+  if (contentType.includes('application/json')) {
+    try {
+      const body = await req.json() as BulkRequestBody;
+      text = body.text;
+    } catch {
+      return jsonResponse({ ok: false, error: 'malformed JSON body' }, 400);
+    }
+  } else {
+    const form = await req.formData().catch(() => null);
+    if (form) text = form.get('text')?.toString();
+  }
+
+  if (!text) {
+    return jsonResponse({ ok: false, error: 'text body required' }, 400);
+  }
+
+  const urls = extractUrls(text);
+  if (urls.length === 0) {
+    return jsonResponse({ ok: false, error: 'no URLs found in text' }, 400);
+  }
+
+  // Enqueue each URL serially. We don't enrich (yt-dlp / readability) here —
+  // bulk paste is a "queue many fast" surface; let the agent's per-plan
+  // ingest pipeline handle enrichment when it processes each plan, or let
+  // the user re-ingest individuals via /ingest if they need transcript.
+  const change_ids: string[] = [];
+  const failed: { url: string; error: string }[] = [];
+  for (const url of urls) {
+    const messageId = `bulk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const msg: InboundMsg = {
+      channel: 'bulk',
+      message_id: messageId,
+      from: payload.name ?? payload.issued_by ?? 'bulk',
+      url,
+      received_at: new Date().toISOString(),
+    };
+    const result = await ingestFromChannel(msg, {
+      vaultRoot: opts.vaultRoot,
+      agent: opts.agent ?? 'mock',
+      hearthStateDir: opts.hearthStateDir,
+      adapterOverride: opts.adapterOverride,
+      tunnelManager: opts.tunnelManager,
+    });
+    if (result.ok && result.change_id) {
+      change_ids.push(result.change_id);
+    } else {
+      failed.push({ url, error: result.error ?? result.summary });
+    }
+  }
+
+  return jsonResponse({ ok: true, change_ids, failed });
+}
+
 export function startReviewServer(opts: ReviewServerOptions): ReviewServerHandle {
   const stateDir = opts.hearthStateDir;
   const store = new PendingStore(stateDir ? join(stateDir, 'pending') : undefined);
@@ -298,6 +420,20 @@ export function startReviewServer(opts: ReviewServerOptions): ReviewServerHandle
       // /ingest is the capture endpoint — separate from /p/:id review URLs.
       if (req.method === 'POST' && url.pathname === '/ingest') {
         return handleIngest(opts, req, token);
+      }
+
+      // /bulk: paste-many surface. GET serves an HTML form; POST extracts
+      // URLs from the text body and queues one plan per URL.
+      if (url.pathname === '/bulk') {
+        // Verify capture token for both GET (rendering UI) and POST.
+        try {
+          verifyCaptureToken(token);
+        } catch (e) {
+          return staleTokenPage(e instanceof CaptureTokenError ? e.reason : 'invalid');
+        }
+        if (req.method === 'GET') return bulkPastePage(token);
+        if (req.method === 'POST') return handleBulk(opts, req, token);
+        return new Response('method not allowed', { status: 405 });
       }
 
       const m = PATH_RE.exec(url.pathname);
