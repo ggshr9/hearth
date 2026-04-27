@@ -136,6 +136,31 @@ describe('doctor: cloudflared check (advisory)', () => {
   });
 });
 
+describe('doctor: yt-dlp check (advisory)', () => {
+  it('reports yt-dlp status with an install hint when absent', () => {
+    const schema = '---\ntype: meta\n---\n\n## hearth permissions\n\n| dir | human | agent |\n|-----|-------|-------|\n| raw/ | add | add |\n| 06 Hearth Inbox/ | rw | rw |\n';
+    const vault = makeVaultWithDirs(['raw', '06 Hearth Inbox'], schema);
+    const report = runDoctor(vault);
+    const yt = report.checks.find(c => c.name.toLowerCase().includes('yt-dlp'));
+    expect(yt).toBeDefined();
+    if (!yt!.ok) {
+      expect(yt!.detail?.toLowerCase()).toMatch(/install|brew|pip/);
+    }
+  });
+
+  it('a missing yt-dlp does NOT fail the overall report', () => {
+    const schema = '---\ntype: meta\n---\n\n## hearth permissions\n\n| dir | human | agent |\n|-----|-------|-------|\n| raw/ | add | add |\n| 06 Hearth Inbox/ | rw | rw |\n';
+    const vault = makeVaultWithDirs(['raw', '06 Hearth Inbox'], schema);
+    const report = runDoctor(vault);
+    const yt = report.checks.find(c => c.name.toLowerCase().includes('yt-dlp'));
+    expect(yt).toBeDefined();
+    if (!yt!.ok) {
+      const otherChecksAllPass = report.checks.filter(c => c !== yt).every(c => c.ok);
+      if (otherChecksAllPass) expect(report.ok).toBe(true);
+    }
+  });
+});
+
 describe('mock-adapter target: safety-ordered', () => {
   function fixtureSchema(extraRows: string): string {
     return [

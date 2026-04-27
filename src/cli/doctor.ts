@@ -95,8 +95,25 @@ export function runDoctor(vaultRoot: string): DoctorReport {
     });
   }
 
-  // Ignore cloudflared check when computing overall ok: it's advisory only.
-  const okChecks = checks.filter(c => c.name !== 'cloudflared on PATH');
+  // 7. yt-dlp on PATH (YouTube transcript enrichment — advisory).
+  // Missing yt-dlp does not fail the report: /ingest still queues YouTube
+  // captures, just without the auto-sub body fetched for the agent.
+  try {
+    execSync('which yt-dlp', { stdio: 'ignore' });
+    checks.push({ name: 'yt-dlp on PATH', ok: true });
+  } catch {
+    checks.push({
+      name: 'yt-dlp on PATH',
+      ok: false,
+      detail: 'yt-dlp enriches YouTube /ingest captures with the auto-subtitle transcript. Install: `brew install yt-dlp` (macOS) or `pip install -U yt-dlp`. Without it, YouTube URLs are captured as bare links — the agent has no transcript to summarize.',
+    });
+  }
+
+  // Cloudflared and yt-dlp are advisory dependencies — they support the
+  // mobile/capture surfaces but don't gate core ingest. Ignore both when
+  // aggregating overall ok.
+  const advisory = new Set(['cloudflared on PATH', 'yt-dlp on PATH']);
+  const okChecks = checks.filter(c => !advisory.has(c.name));
   return { ok: okChecks.every(c => c.ok), checks };
 }
 
