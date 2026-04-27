@@ -4,6 +4,30 @@ Versions are sequenced for **trust closure first, format coverage last**. The or
 
 ---
 
+## Near-term priority shift (2026-04-27)
+
+The version sequence below was drafted before the substrate framing in [PRODUCT.md "Hearth in the multi-LLM era"](./PRODUCT.md#hearth-in-the-multi-llm-era). Two practical implications:
+
+- **LLM-conversation capture is being elevated** ahead of v0.5/v0.6/v0.7 polish. The hero use case for the substrate framing is dumping a ChatGPT or Claude conversation into hearth and continuing it tomorrow with a different LLM via MCP. That requires a browser extension (or equivalent) that pulls a chat thread out of vendor UIs and POSTs it to `/ingest`. This is the highest-ROI next surface, ahead of auto-policy.
+- **Cross-LLM context query via MCP** is the killer use of hearth's existing MCP server, not just "agent edits vault". A `vault_query_conversations` tool that returns prior threads on a topic regardless of which LLM produced them is a small addition with outsized value.
+
+The version path below remains valid for trust-layer work; capture-surface work runs as a parallel track with its own short-cycle versions (v0.4.x).
+
+---
+
+## v0.4.x — Capture surface coverage (parallel to v0.5+)
+
+- v0.4.1: capture-token + `POST /ingest` endpoint (shipped 2026-04-27)
+- v0.4.2: YouTube transcript fetch via yt-dlp (shipped 2026-04-27)
+- v0.4.3: browser extension that dumps ChatGPT / Claude / Gemini conversations to `/ingest` (next)
+- v0.4.4: MCP `vault_query_conversations(topic, since?, agents?)` for cross-LLM continuity
+- v0.4.5: voice-memo capture (Whisper-local transcribe → ingest)
+- v0.4.6: article extraction (Readability) for non-YouTube URL captures
+
+Each is small (1-3 days) and independently shippable. Sequence by user signal during dogfood, not by upfront planning.
+
+---
+
 ## v0.1 — local CLI core loop (markdown only; URL is stretch)
 
 The minimum that proves "raw → wiki → query → lint" is a real loop, not a demo.

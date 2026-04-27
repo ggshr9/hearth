@@ -36,6 +36,45 @@ the vault.
 
 ---
 
+## Hearth in the multi-LLM era
+
+The deeper why behind the architecture: in a world where you talk to
+ChatGPT, Claude, Gemini, and tomorrow's nameless model on the same day,
+**the substrate of your knowledge cannot be locked inside any one of them**.
+
+Four pains every multi-LLM heavy user already feels:
+
+- **Chat conversations don't land anywhere.** A 90-minute productive thread
+  with one assistant lives in that vendor's silo. There is no clean export
+  to your notes; copy-paste destroys formatting. Tomorrow you scroll a thread
+  to find what you concluded.
+- **Cross-LLM continuity is broken.** A discussion in one assistant cannot
+  be continued in another. Each vendor treats you as their exclusive user,
+  and vendor incentives oppose ever solving this.
+- **Multi-agent collaboration on the same data does not exist.** Letting GPT
+  and Claude jointly review the same plan is a workflow you have to engineer
+  yourself.
+- **All your inputs are scattered.** Articles in Readwise, videos on
+  YouTube, voice memos in iOS Notes, chat threads in three vendors, screenshots
+  in your camera roll — these are the same kind of thing (your inputs), in
+  five different silos.
+
+Hearth's substrate posture answers all four:
+
+- Vault is local — yours, plain markdown, no vendor can rent-seek your data
+- Any AI can read + write through the governed surface — vendor-neutral
+- Channel-first capture means everything (chat, articles, video, voice) can
+  land in one place
+- Multi-agent is first-class because the kernel and audit log enforce a
+  shared contract no agent gets to bypass
+
+Phrased the other way: prior "second brain" attempts — Roam, Mem, Reflect,
+Notion AI — failed at this because each is itself a closed vendor. Hearth's
+bet is that the substrate layer for the multi-LLM era cannot belong to any
+single LLM company; it has to belong to you.
+
+---
+
 ## Heritage: from LLM Wiki to Vault Governance
 
 Andrej Karpathy's [LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)

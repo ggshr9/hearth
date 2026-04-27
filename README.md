@@ -11,12 +11,16 @@
 
 ## What makes hearth different
 
-There are already a handful of "Karpathy LLM Wiki implementations". `hearth` is one — but its differentiation is in **how it makes the wiki trustworthy**:
+You already talk to ChatGPT, Claude, and Gemini in the same week. Their conversations don't land anywhere; cross-vendor continuity is broken; the rest of what you read / watch / record lives in three more silos. **hearth is the substrate that catches all of it — vendor-neutral, locally-owned, governed.**
 
-- **Transaction-controlled writes.** The agent never writes the vault directly. It produces a `ChangePlan`; a vault kernel applies it after permission and policy checks. You can run hearth for a week and never find a wiki page you didn't approve.
+Four properties that come together:
+
+- **Vendor-neutral by construction.** Vault is plain markdown on your disk. Any AI talks to it through MCP — Claude, Codex, Cursor, future ones. No vendor rents your knowledge.
+- **Channel-first capture.** Everything you produce/consume lands here — chat conversations, articles, videos, voice — through the surfaces you already use (phone share sheet, WeChat, browser extension), not where you wish you were (sitting at your desk).
+- **Transaction-controlled writes.** The agent never writes the vault directly. It produces a `ChangePlan`; a vault kernel applies it after permission and policy checks. Run hearth for a week and never find a wiki page you didn't approve.
 - **Claim-level citations.** Every assertion in an agent-written page anchors to a specific source location — file + line, page number for PDFs, timestamp for video. "Cite the file" isn't enough; you cite the line.
-- **Source-as-data.** Web pages, PDFs, chat transcripts ingested into the vault are treated as untrusted data, never as instruction. A malicious blog post cannot hijack the agent.
-- **Channel-first capture.** The other half of the differentiation: capture happens where you are (your phone, in WeChat, mid-conversation, by voice) — not where you wish you were (sitting at your desk, opening Obsidian).
+
+Plus a hard rule that makes the rest hold: **source-as-data, never instruction**. Ingested content (web pages, PDFs, chat transcripts) is treated as untrusted data — a malicious blog post can't hijack the agent.
 
 ## Three verbs
 
