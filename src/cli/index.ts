@@ -369,14 +369,17 @@ export function cmdConsumer(positionals: string[], values: Record<string, string
   if (sub === 'add') {
     const id = positionals[1];
     if (!id) fail('consumer add: missing <id>. usage: hearth consumer add <id> --sources <csv|*> [--vault r|none]');
-    const rawSources = (values.sources as string | undefined);
-    if (!rawSources) fail('consumer add: missing --sources <csv|*> (e.g. --sources wechat-cc  or  --sources "*")');
+    if (!/^[A-Za-z0-9._-]+$/.test(id)) fail('consumer add: <id> must match [A-Za-z0-9._-]+ (got "' + id + '")');
+    const rawSources = values.sources as string | undefined;
+    if (rawSources === undefined) fail('consumer add: missing --sources <csv|*> (use --sources "" for no federated sources, --sources "*" for all)');
     const sources: '*' | string[] = rawSources.trim() === '*' ? '*' : rawSources.split(',').map(s => s.trim()).filter(Boolean);
     const vault = (values.vault as string | undefined) ?? 'r';
     if (vault !== 'r' && vault !== 'none') fail(`consumer add: --vault must be r|none (got "${vault}")`);
+    const existed = listConsumers(stateDir).some(c => c.id === id);
     const { token } = addConsumer({ id, sources, vault, stateDir });
-    const srcLabel = sources === '*' ? '*' : sources.join(',');
+    const srcLabel = sources === '*' ? '*' : sources.length === 0 ? '(none)' : sources.join(',');
     process.stdout.write(
+      (existed ? `⚠ consumer "${id}" already existed — its previous token is now INVALID (replaced).\n\n` : '') +
       `✓ consumer "${id}" added (vault=${vault}, sources=${srcLabel})\n\n` +
       `token: ${token}\n\n` +
       `⚠ This token is shown ONLY now — hearth stores only its hash. Save it.\n` +
