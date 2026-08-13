@@ -23,6 +23,15 @@ test('addConsumer writes a 0600 file with a hashed (not plaintext) token, return
   expect(statSync(path).mode & 0o777).toBe(0o600);  // 0600
 });
 
+test('addConsumer forces 0600 even when consumers.json pre-exists at looser perms', () => {
+  const dir = tmp();
+  const path = join(dir, 'consumers.json');
+  require('node:fs').writeFileSync(path, JSON.stringify({ version: 1, consumers: [] }), { mode: 0o644 });
+  expect(statSync(path).mode & 0o777).toBe(0o644); // sanity: pre-existing loose perms
+  addConsumer({ id: 'codex', sources: ['wechat-cc'], vault: 'r', stateDir: dir });
+  expect(statSync(path).mode & 0o777).toBe(0o600); // overwrite must force 0600, not just create
+});
+
 test('resolveConsumer accepts the right token, rejects wrong token and unknown id', () => {
   const dir = tmp();
   const { token } = addConsumer({ id: 'codex', sources: ['wechat-cc'], vault: 'r', stateDir: dir });

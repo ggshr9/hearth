@@ -5,7 +5,7 @@
 // constant-time. Malformed/missing store => no grants (fail-closed).
 
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { b64url, timingSafeEqual } from './token-crypto.ts';
@@ -48,14 +48,19 @@ function isStored(e: unknown): e is StoredConsumer {
   if (typeof c.id !== 'string' || c.id.length === 0) return false;
   if (typeof c.token_hash !== 'string') return false;
   if (c.vault !== 'r' && c.vault !== 'none') return false;
-  if (c.sources !== '*' && !Array.isArray(c.sources)) return false;
+  if (c.sources !== '*') {
+    if (!Array.isArray(c.sources)) return false;
+    if (!c.sources.every(s => typeof s === 'string')) return false;
+  }
   return true;
 }
 
 function writeStore(store: Store, stateDir?: string): void {
   const dir = stateDir ?? defaultStateDir();
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  writeFileSync(storePath(stateDir), JSON.stringify(store, null, 2) + '\n', { mode: 0o600 });
+  const path = storePath(stateDir);
+  writeFileSync(path, JSON.stringify(store, null, 2) + '\n', { mode: 0o600 });
+  chmodSync(path, 0o600); // writeFileSync mode is create-only; force 0600 on overwrite too
 }
 
 function toGrant(c: StoredConsumer): ConsumerGrant { return { id: c.id, vault: c.vault, sources: c.sources }; }
