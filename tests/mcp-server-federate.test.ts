@@ -199,7 +199,7 @@ describe('vault_query: federate:true — the federated router path', () => {
 
     const { client, close } = await connectedClient({
       vaultRoot: vault,
-      stateDir,
+      hearthStateDir: stateDir,
       federatedQueryFn: async (vaultRoot, question, opts): Promise<QueryResult> => {
         sawArgs = [vaultRoot, question, opts];
         return canned;
@@ -223,7 +223,7 @@ describe('vault_query: federate:true — the federated router path', () => {
   it('federate:true with no injected seam falls through to the real federatedQuery() (smoke test, no throw, no sources registered → local-only)', async () => {
     const vault = makeVaultWithClaim();
     const stateDir = mkdtempSync(join(tmpdir(), 'hearth-mcp-fed-state-'));
-    const { client, close } = await connectedClient({ vaultRoot: vault, stateDir });
+    const { client, close } = await connectedClient({ vaultRoot: vault, hearthStateDir: stateDir });
     try {
       const result = await client.callTool({ name: 'vault_query', arguments: { question: 'what is hearth?', federate: true } });
       const parsed = JSON.parse(parseResultText(result));
