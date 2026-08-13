@@ -8,6 +8,11 @@
 //   vault_plan_ingest         → returns ChangePlan, queues to pending
 //   vault_apply_change        → token-gated; without token returns
 //                                REQUIRES_HUMAN_APPROVAL with CLI hint
+//   vault_plan_submit         → channel-trusted; validates + queues a
+//                                pre-built ChangePlan. Never writes the vault.
+//   vault_apply_for_owner     → channel-trusted; applies a pending plan under
+//                                channel-ownership auth (no token). High-risk
+//                                (requires_review) plans are left pending.
 // Resources:
 //   hearth://schema, hearth://vault-map, hearth://pending,
 //   hearth://lint-report, hearth://agent-instructions
@@ -27,6 +32,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { homedir } from 'node:os';
 import { loadSchema, schemaVersionHash, schemaLastModified } from './core/schema.ts';
 import { PendingStore } from './core/pending-store.ts';
 import { createKernel } from './core/vault-kernel.ts';
@@ -34,14 +40,26 @@ import { buildClaimIndex } from './core/citations.ts';
 import { lint } from './core/lint.ts';
 import { query, NO_ANSWER } from './core/query.ts';
 import { runDoctor } from './cli/doctor.ts';
-import { ingestFromChannel } from './runtime.ts';
+import { ingestFromChannel, applyForOwner } from './runtime.ts';
 import { audit } from './core/audit.ts';
 import { verifyAndConsume, TokenError } from './core/approval-token.ts';
+import { validateChangePlan, PlanValidationError } from './core/plan-validator.ts';
 import { ErrorCode } from './core/types.ts';
 import { AGENT_INSTRUCTIONS } from './core/agent-instructions.ts';
 
 interface ServerContext {
   vaultRoot: string;
+  /** Override hearth state dir (pending queue, channel inbox). Defaults to
+   *  ~/.hearth. Primarily for tests; production stdio startup leaves this
+   *  unset and gets the real per-user state dir. */
+  hearthStateDir?: string;
+}
+
+/** Resolve the hearth state dir the same way runtime.ts's channel-side
+ *  functions do (ctx override, else ~/.hearth). Kept local to avoid
+ *  widening runtime.ts's private default just for this. */
+function stateDirFor(ctx: ServerContext): string {
+  return ctx.hearthStateDir ?? join(homedir(), '.hearth');
 }
 
 function jsonContent(obj: unknown): { content: { type: 'text'; text: string }[] } {
@@ -137,6 +155,31 @@ export function createMcpServer(ctx: ServerContext): Server {
           properties: {
             change_id: { type: 'string' },
             approval_token: { type: 'string' },
+          },
+        },
+      },
+      {
+        name: 'vault_plan_submit',
+        description: 'Submit a pre-built ChangePlan from a trusted channel. Validated against SCHEMA.md and queued to pending. Does NOT modify the vault — use vault_apply_for_owner to apply it.',
+        inputSchema: {
+          type: 'object',
+          required: ['change_plan'],
+          properties: {
+            change_plan: { type: 'object', description: 'A ChangePlan object built by the caller (not generated here).' },
+            origin: { type: 'string', description: 'Optional label for where this plan came from (channel id, etc.).' },
+          },
+        },
+      },
+      {
+        name: 'vault_apply_for_owner',
+        description: 'Apply a pending ChangePlan under channel-ownership authentication — the caller vouches for the owner, no approval_token needed. High-risk plans (requires_review) are left pending instead of applied.',
+        inputSchema: {
+          type: 'object',
+          required: ['change_id', 'owner_id', 'channel'],
+          properties: {
+            change_id: { type: 'string' },
+            owner_id: { type: 'string', description: 'Identity string for the audit log (e.g. the owning user id on the channel).' },
+            channel: { type: 'string', description: 'Channel identifier for the audit log (e.g. the channel this call came from).' },
           },
         },
       },
@@ -274,6 +317,58 @@ export function createMcpServer(ctx: ServerContext): Server {
         }
         store.remove(id);
         await audit(ctx.vaultRoot, { event: 'changeplan.applied', initiated_by: 'mcp', data: { change_id: id, ops: result.ops.length } }).catch(() => {});
+        return jsonContent(result);
+      }
+
+      if (name === 'vault_plan_submit') {
+        let plan;
+        try {
+          plan = validateChangePlan(args.change_plan, { schema, vaultRoot: ctx.vaultRoot });
+        } catch (e) {
+          if (e instanceof PlanValidationError) {
+            return errorContent('PLAN_VALIDATION_FAILED', e.message, e.issues.length ? e.issues.join('\n  - ') : undefined);
+          }
+          throw e;
+        }
+        const store = new PendingStore(join(stateDirFor(ctx), 'pending'));
+        store.save(plan);
+        await audit(ctx.vaultRoot, {
+          event: 'changeplan.created',
+          initiated_by: 'mcp',
+          data: { change_id: plan.change_id, ops: plan.ops.length, risk: plan.risk, origin: args.origin ? String(args.origin) : undefined },
+        }).catch(() => {});
+        return jsonContent({
+          change_id: plan.change_id,
+          risk: plan.risk,
+          ops: plan.ops.length,
+          requires_review: plan.requires_review,
+        });
+      }
+
+      if (name === 'vault_apply_for_owner') {
+        const id = String(args.change_id ?? '');
+        const ownerId = String(args.owner_id ?? '');
+        const channel = String(args.channel ?? '');
+        const store = new PendingStore(join(stateDirFor(ctx), 'pending'));
+        let plan;
+        try { plan = store.load(id); }
+        catch (e) { return errorContent('PLAN_VALIDATION_FAILED', `pending plan not found: ${id}`); }
+
+        if (plan.requires_review) {
+          return jsonContent({
+            ok: false,
+            requires_review: true,
+            change_id: id,
+            rendered: 'high-risk plan left pending for review',
+          });
+        }
+
+        const result = await applyForOwner(id, {
+          vaultRoot: ctx.vaultRoot,
+          ownerId,
+          channel,
+          hearthStateDir: ctx.hearthStateDir,
+        });
         return jsonContent(result);
       }
 
