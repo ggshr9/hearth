@@ -17,6 +17,13 @@ export interface QueryHit {
   anchor_summary: string;     // human-readable: "L74-L79", "page 12", etc.
   confidence: 'high' | 'medium' | 'low';
   match_score: number;
+  /** Phase 2a (federated query): where this hit came from. Local vault hits
+   *  are always 'vault'; a federated source sets this to 'federated'. */
+  origin: 'vault' | 'federated';
+  /** Who verified this hit. Local vault hits are always verified by the
+   *  vault's own citation pipeline ('vault'); a federated hit carries the
+   *  id of the external source that produced it. */
+  verified_by: 'vault' | string;
 }
 
 export interface QueryResult {
@@ -70,6 +77,8 @@ export function query(vaultRoot: string, question: string, opts: { limit?: numbe
     anchor_summary: anchorSummary(rec),
     confidence: rec.claim.confidence,
     match_score: Math.round(score * 100) / 100,
+    origin: 'vault',
+    verified_by: 'vault',
   }));
 
   return { question, hits, no_answer_message: NO_ANSWER };

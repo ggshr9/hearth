@@ -255,6 +255,23 @@ describe('query: deliberately conservative', () => {
     expect(hit.confidence).toBe('high');
   });
 
+  it('[HF1] local hits carry origin:"vault" and verified_by:"vault"', () => {
+    const vault = makeVault();
+    const quote = 'Hearth is a personal AI runtime for your markdown vault.';
+    writeSource(vault, 'a.md', quote);
+    writeWikiPage(vault, '01 Topics/intro.md', {
+      type: 'concept', status: 'draft', author: 'agent:extract',
+      claims: [{ text: quote, source: 'raw/a.md', anchor: { type: 'line', line_start: 1, line_end: 1, quote, quote_hash: sha256(quote) }, confidence: 'high' }],
+    }, '# Intro\n');
+
+    const r = query(vault, 'what is hearth?');
+    expect(r.hits.length).toBeGreaterThan(0);
+    for (const hit of r.hits) {
+      expect(hit.origin).toBe('vault');
+      expect(hit.verified_by).toBe('vault');
+    }
+  });
+
   it('does NOT return claims that fail verification (drift / missing source)', () => {
     const vault = makeVault();
     // Source missing for the claim — should NOT surface in query results
