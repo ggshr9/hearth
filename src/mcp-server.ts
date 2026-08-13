@@ -38,7 +38,7 @@ import { PendingStore } from './core/pending-store.ts';
 import { createKernel } from './core/vault-kernel.ts';
 import { buildClaimIndex } from './core/citations.ts';
 import { lint } from './core/lint.ts';
-import { query, NO_ANSWER } from './core/query.ts';
+import { query, federatedQuery, NO_ANSWER } from './core/query.ts';
 import { runDoctor } from './cli/doctor.ts';
 import { ingestFromChannel, applyForOwner } from './runtime.ts';
 import { audit } from './core/audit.ts';
@@ -49,10 +49,21 @@ import { AGENT_INSTRUCTIONS } from './core/agent-instructions.ts';
 
 interface ServerContext {
   vaultRoot: string;
-  /** Override hearth state dir (pending queue, channel inbox). Defaults to
-   *  ~/.hearth. Primarily for tests; production stdio startup leaves this
-   *  unset and gets the real per-user state dir. */
+  /** Override hearth state dir (pending queue, channel inbox, and the
+   *  federated source registry's sources.json). Defaults to ~/.hearth.
+   *  Primarily for tests; production stdio startup leaves this unset and
+   *  gets the real per-user state dir. One field for the whole ~/.hearth
+   *  story — pending-store, runtime.ts's channel path, and federatedQuery
+   *  all resolve the same override. */
   hearthStateDir?: string;
+  /**
+   * Phase 2a (HF3) test seam: override the federatedQuery function used by
+   * the vault_query `federate: true` path. Defaults to the real
+   * federatedQuery. Lets tests assert "no source is consulted" as a hard
+   * fact (call count) when federate is absent/false, without a mocking
+   * library or a real MCP source.
+   */
+  federatedQueryFn?: typeof federatedQuery;
 }
 
 /** Resolve the hearth state dir the same way runtime.ts's channel-side
@@ -102,11 +113,14 @@ export function createMcpServer(ctx: ServerContext): Server {
       },
       {
         name: 'vault_query',
-        description: 'Conservative query: returns verified claims with citations, or the literal "no answer found in vault".',
+        description: 'Conservative query: returns verified claims with citations, or the literal "no answer found in vault". Set federate:true to also merge in answers from registered federated sources (labeled origin:"federated", never re-verified by hearth).',
         inputSchema: {
           type: 'object',
           required: ['question'],
-          properties: { question: { type: 'string' } },
+          properties: {
+            question: { type: 'string' },
+            federate: { type: 'boolean' },
+          },
         },
       },
       {
@@ -216,7 +230,15 @@ export function createMcpServer(ctx: ServerContext): Server {
       }
 
       if (name === 'vault_query') {
-        const result = query(ctx.vaultRoot, String(args.question ?? ''));
+        const question = String(args.question ?? '');
+        // Honesty guarantee: federate defaults to off. Absent or false takes
+        // the exact same path hearth's local-only query has always taken —
+        // no source-registry read, no federated MCP call, nothing that could
+        // make vault_query answer with content hearth never verified itself.
+        const federate = args.federate === true;
+        const result = federate
+          ? await (ctx.federatedQueryFn ?? federatedQuery)(ctx.vaultRoot, question, { stateDir: stateDirFor(ctx) })
+          : query(ctx.vaultRoot, question);
         if (result.hits.length === 0) {
           return { content: [{ type: 'text' as const, text: NO_ANSWER }] };
         }
