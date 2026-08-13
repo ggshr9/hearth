@@ -471,18 +471,46 @@ export function createMcpServer(ctx: ServerContext): Server {
   });
 
   // ── Resources ────────────────────────────────────────────────────────────
-  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
-    resources: [
+  // Same PUBLIC/OWNER_ONLY policy as ReadResourceRequestSchema below, so a
+  // scoped consumer isn't even advertised resources it can't read.
+  const RESOURCE_PUBLIC = new Set(['hearth://agent-instructions']);
+  const RESOURCE_OWNER_ONLY = new Set(['hearth://pending']);
+
+  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    const all = [
       { uri: 'hearth://schema',             mimeType: 'text/markdown', name: 'SCHEMA.md' },
       { uri: 'hearth://vault-map',          mimeType: 'application/json', name: 'Vault map' },
       { uri: 'hearth://pending',            mimeType: 'application/json', name: 'Pending ChangePlans' },
       { uri: 'hearth://lint-report',        mimeType: 'application/json', name: 'Latest lint report' },
       { uri: 'hearth://agent-instructions', mimeType: 'text/markdown', name: 'How to be a good hearth agent' },
-    ],
-  }));
+    ];
+    const rc = ctx.consumer ?? null;
+    if (rc === null) return { resources: all };
+    if ('denied' in rc) return { resources: all.filter(r => RESOURCE_PUBLIC.has(r.uri)) };
+    return {
+      resources: all.filter(r => {
+        if (RESOURCE_PUBLIC.has(r.uri)) return true;
+        if (RESOURCE_OWNER_ONLY.has(r.uri)) return false;
+        return consumerCanReadVault(rc);
+      }),
+    };
+  });
 
   server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
     const uri = req.params.uri;
+    // Phase 3 consumer gate for the resources surface — sibling JSON-RPC
+    // channel on the same broker process; must not route around the tool gate.
+    const rc = ctx.consumer ?? null;
+    if (rc !== null) {
+      const denyAudit = (reason: string) =>
+        audit(ctx.vaultRoot, { event: 'query', initiated_by: 'mcp',
+          data: { consumer: ('id' in rc ? rc.id : undefined) ?? 'unknown', denied: true, reason, resource: uri } }).catch(() => {});
+      if ('denied' in rc) { await denyAudit(rc.denied); throw new Error(`permission denied: ${rc.denied}`); }
+      if (!RESOURCE_PUBLIC.has(uri)) {
+        if (RESOURCE_OWNER_ONLY.has(uri)) { await denyAudit('owner_only_resource'); throw new Error(`permission denied: resource ${uri} is owner-only`); }
+        if (!consumerCanReadVault(rc)) { await denyAudit('no_vault_grant'); throw new Error(`permission denied: consumer "${rc.id}" has no vault read grant`); }
+      }
+    }
     if (uri === 'hearth://schema') {
       const p = join(ctx.vaultRoot, 'SCHEMA.md');
       const text = existsSync(p) ? readFileSync(p, 'utf8') : '(no SCHEMA.md — run `hearth adopt`)';

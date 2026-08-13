@@ -215,3 +215,154 @@ describe('owner (no consumer field) — unrestricted, byte-identical to pre-Phas
     }
   });
 });
+
+// ── resources/read — sibling JSON-RPC surface, same broker ────────────────
+//
+// Round-2 fix: hearth://pending, hearth://schema, hearth://vault-map, and
+// hearth://lint-report were completely ungated on the resources channel —
+// a denied or vault:'none' consumer could call readResource() directly and
+// get e.g. every pending ChangePlan's full patch content (unreviewed file
+// bodies) or the raw vault SCHEMA.md, bypassing the tool gate entirely.
+
+describe('resources/read gate: denied consumer — every vault-derived resource rejected', () => {
+  it('hearth://schema rejects', async () => {
+    const vault = makeVault();
+    const { client, close } = await connectedClient({ vaultRoot: vault, consumer: { denied: 'bad_token', id: 'x' } });
+    try {
+      await expect(client.readResource({ uri: 'hearth://schema' })).rejects.toBeTruthy();
+    } finally {
+      await close();
+    }
+  });
+
+  it('hearth://vault-map rejects', async () => {
+    const vault = makeVault();
+    const { client, close } = await connectedClient({ vaultRoot: vault, consumer: { denied: 'bad_token', id: 'x' } });
+    try {
+      await expect(client.readResource({ uri: 'hearth://vault-map' })).rejects.toBeTruthy();
+    } finally {
+      await close();
+    }
+  });
+
+  it('hearth://pending rejects (the PoC path — full pending-plan bodies never leak)', async () => {
+    const vault = makeVault();
+    const { client, close } = await connectedClient({ vaultRoot: vault, consumer: { denied: 'bad_token', id: 'x' } });
+    try {
+      await expect(client.readResource({ uri: 'hearth://pending' })).rejects.toBeTruthy();
+    } finally {
+      await close();
+    }
+  });
+
+  it('ListResources advertises nothing vault-derived (agent-instructions only, if anything)', async () => {
+    const vault = makeVault();
+    const { client, close } = await connectedClient({ vaultRoot: vault, consumer: { denied: 'bad_token', id: 'x' } });
+    try {
+      const { resources } = await client.listResources();
+      expect(resources.map(r => r.uri)).toEqual(['hearth://agent-instructions']);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe("resources/read gate: vault:'none' resolved consumer", () => {
+  it('hearth://schema, hearth://vault-map, hearth://lint-report all rejected', async () => {
+    const vault = makeVault();
+    const { client, close } = await connectedClient({ vaultRoot: vault, consumer: { id: 'c', vault: 'none', sources: [] } });
+    try {
+      await expect(client.readResource({ uri: 'hearth://schema' })).rejects.toBeTruthy();
+      await expect(client.readResource({ uri: 'hearth://vault-map' })).rejects.toBeTruthy();
+      await expect(client.readResource({ uri: 'hearth://lint-report' })).rejects.toBeTruthy();
+    } finally {
+      await close();
+    }
+  });
+
+  it('hearth://pending rejected (owner-only, independent of vault grant)', async () => {
+    const vault = makeVault();
+    const { client, close } = await connectedClient({ vaultRoot: vault, consumer: { id: 'c', vault: 'none', sources: [] } });
+    try {
+      await expect(client.readResource({ uri: 'hearth://pending' })).rejects.toBeTruthy();
+    } finally {
+      await close();
+    }
+  });
+
+  it('hearth://agent-instructions succeeds (static guidance, no vault data)', async () => {
+    const vault = makeVault();
+    const { client, close } = await connectedClient({ vaultRoot: vault, consumer: { id: 'c', vault: 'none', sources: [] } });
+    try {
+      const result = await client.readResource({ uri: 'hearth://agent-instructions' });
+      expect(result.contents[0]?.text).toBeTruthy();
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe("resources/read gate: vault:'r' resolved consumer", () => {
+  it('hearth://schema and hearth://vault-map succeed', async () => {
+    const vault = makeVault();
+    const { client, close } = await connectedClient({ vaultRoot: vault, consumer: { id: 'c', vault: 'r', sources: [] } });
+    try {
+      const schema = await client.readResource({ uri: 'hearth://schema' });
+      expect(schema.contents[0]?.text).toBeTruthy();
+      const map = await client.readResource({ uri: 'hearth://vault-map' });
+      expect(map.contents[0]?.text).toBeTruthy();
+    } finally {
+      await close();
+    }
+  });
+
+  it('hearth://pending still rejected — owner-only regardless of vault:r', async () => {
+    const vault = makeVault();
+    const { client, close } = await connectedClient({ vaultRoot: vault, consumer: { id: 'c', vault: 'r', sources: [] } });
+    try {
+      await expect(client.readResource({ uri: 'hearth://pending' })).rejects.toBeTruthy();
+    } finally {
+      await close();
+    }
+  });
+
+  it('ListResources advertises schema/vault-map/lint-report/agent-instructions but not pending', async () => {
+    const vault = makeVault();
+    const { client, close } = await connectedClient({ vaultRoot: vault, consumer: { id: 'c', vault: 'r', sources: [] } });
+    try {
+      const { resources } = await client.listResources();
+      const uris = resources.map(r => r.uri).sort();
+      expect(uris).toEqual(['hearth://agent-instructions', 'hearth://lint-report', 'hearth://schema', 'hearth://vault-map']);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('resources/read gate: owner (no consumer field) — unrestricted, byte-identical to before', () => {
+  it('every resource reads successfully, including hearth://pending', async () => {
+    const vault = makeVault();
+    const { client, close } = await connectedClient({ vaultRoot: vault });
+    try {
+      for (const uri of ['hearth://schema', 'hearth://vault-map', 'hearth://pending', 'hearth://lint-report', 'hearth://agent-instructions']) {
+        const result = await client.readResource({ uri });
+        expect(result.contents[0]?.text).toBeTruthy();
+      }
+    } finally {
+      await close();
+    }
+  });
+
+  it('ListResources advertises all five resources', async () => {
+    const vault = makeVault();
+    const { client, close } = await connectedClient({ vaultRoot: vault });
+    try {
+      const { resources } = await client.listResources();
+      expect(resources.map(r => r.uri).sort()).toEqual([
+        'hearth://agent-instructions', 'hearth://lint-report', 'hearth://pending', 'hearth://schema', 'hearth://vault-map',
+      ]);
+    } finally {
+      await close();
+    }
+  });
+});
