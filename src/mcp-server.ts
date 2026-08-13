@@ -86,6 +86,12 @@ function jsonContent(obj: unknown): { content: { type: 'text'; text: string }[] 
   return { content: [{ type: 'text', text: JSON.stringify(obj, null, 2) }] };
 }
 
+/** The read/query surface a scoped (non-owner) consumer may ever call.
+ *  Shared by the CallTool gate and the ListTools filter so the two can't
+ *  drift apart — what a consumer is allowed to call must match what it's
+ *  advertised. */
+const CONSUMER_READ_TOOLS = new Set(['vault_query', 'vault_read', 'vault_search']);
+
 function errorContent(code: keyof typeof ErrorCode, message: string, hint?: string): { content: { type: 'text'; text: string }[]; isError: true } {
   return {
     content: [{ type: 'text', text: JSON.stringify({ error: { code, message, ...(hint ? { hint } : {}) } }, null, 2) }],
@@ -100,8 +106,8 @@ export function createMcpServer(ctx: ServerContext): Server {
   );
 
   // ── Tools ────────────────────────────────────────────────────────────────
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    const tools = [
       {
         name: 'vault_search',
         description: 'Search vault wiki pages by keyword (ripgrep over verified claim text).',
@@ -206,8 +212,24 @@ export function createMcpServer(ctx: ServerContext): Server {
           },
         },
       },
-    ],
-  }));
+    ];
+
+    // Phase 3 consumer filter: advertise only the tools a consumer can
+    // actually call, consistent with the CallTool gate above and the
+    // ListResources filter below. Owner (ctx.consumer == null) is
+    // unrestricted; a denied consumer sees nothing; a resolved grant sees
+    // the read/query surface, minus vault_read/vault_search when it has no
+    // vault read grant.
+    const rc = ctx.consumer ?? null;
+    if (rc === null) return { tools };
+    if ('denied' in rc) return { tools: [] };
+    const filtered = tools.filter(t => {
+      if (!CONSUMER_READ_TOOLS.has(t.name)) return false;
+      if ((t.name === 'vault_read' || t.name === 'vault_search') && !consumerCanReadVault(rc)) return false;
+      return true;
+    });
+    return { tools: filtered };
+  });
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const name = req.params.name;
@@ -236,8 +258,7 @@ export function createMcpServer(ctx: ServerContext): Server {
         return errorContent('PERMISSION_DENIED', `permission denied: ${gateConsumer.denied}`,
           'This consumer failed authentication; no tool is available.');
       }
-      const CONSUMER_TOOLS = new Set(['vault_query', 'vault_read', 'vault_search']);
-      if (!CONSUMER_TOOLS.has(name)) {
+      if (!CONSUMER_READ_TOOLS.has(name)) {
         await denyAudit('owner_only_tool');
         return errorContent('PERMISSION_DENIED',
           `tool "${name}" is owner-only; consumer "${gateConsumer.id}" may not call it`);

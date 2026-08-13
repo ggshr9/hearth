@@ -38,7 +38,7 @@ test('consumer add prints a working token exactly once and stores only the hash'
   const out = capture(() => cmdConsumer(['add', 'codex'], { sources: 'wechat-cc', vault: 'r', 'state-dir': dir }));
   const m = out.match(/token[:\s]+([A-Za-z0-9_-]{20,})/);
   expect(m).not.toBeNull();
-  const token = m![1];
+  const token = m![1]!;
   // the printed token actually authenticates
   const resolved = resolveConsumer('codex', token, dir);
   expect('denied' in (resolved as any)).toBe(false);

@@ -63,6 +63,11 @@ function firstText(result: Awaited<ReturnType<Client['callTool']>>): string {
   return first.text;
 }
 
+function resourceText(c: { text?: string; blob?: string }): string {
+  if (typeof c.text !== 'string') throw new Error('expected text resource content, got blob');
+  return c.text;
+}
+
 describe('denied consumer: bad token — every tool refused, vault never touched', () => {
   it('vault_read is refused (PoC path) and the secret never leaves the server', async () => {
     const vault = makeVault();
@@ -295,7 +300,7 @@ describe("resources/read gate: vault:'none' resolved consumer", () => {
     const { client, close } = await connectedClient({ vaultRoot: vault, consumer: { id: 'c', vault: 'none', sources: [] } });
     try {
       const result = await client.readResource({ uri: 'hearth://agent-instructions' });
-      expect(result.contents[0]?.text).toBeTruthy();
+      expect(resourceText(result.contents[0]!)).toBeTruthy();
     } finally {
       await close();
     }
@@ -308,9 +313,9 @@ describe("resources/read gate: vault:'r' resolved consumer", () => {
     const { client, close } = await connectedClient({ vaultRoot: vault, consumer: { id: 'c', vault: 'r', sources: [] } });
     try {
       const schema = await client.readResource({ uri: 'hearth://schema' });
-      expect(schema.contents[0]?.text).toBeTruthy();
+      expect(resourceText(schema.contents[0]!)).toBeTruthy();
       const map = await client.readResource({ uri: 'hearth://vault-map' });
-      expect(map.contents[0]?.text).toBeTruthy();
+      expect(resourceText(map.contents[0]!)).toBeTruthy();
     } finally {
       await close();
     }
@@ -346,7 +351,7 @@ describe('resources/read gate: owner (no consumer field) — unrestricted, byte-
     try {
       for (const uri of ['hearth://schema', 'hearth://vault-map', 'hearth://pending', 'hearth://lint-report', 'hearth://agent-instructions']) {
         const result = await client.readResource({ uri });
-        expect(result.contents[0]?.text).toBeTruthy();
+        expect(resourceText(result.contents[0]!)).toBeTruthy();
       }
     } finally {
       await close();
@@ -361,6 +366,64 @@ describe('resources/read gate: owner (no consumer field) — unrestricted, byte-
       expect(resources.map(r => r.uri).sort()).toEqual([
         'hearth://agent-instructions', 'hearth://lint-report', 'hearth://pending', 'hearth://schema', 'hearth://vault-map',
       ]);
+    } finally {
+      await close();
+    }
+  });
+});
+
+// ── tools/list — advertise only what the consumer can actually call ──────
+//
+// Round-3 fix: ListTools used to hand every consumer the full 11-tool menu
+// regardless of grant, inconsistent with ListResources (which already
+// filters). Now it filters via the same CONSUMER_READ_TOOLS set the
+// CallTool gate uses, so what's advertised matches what's callable.
+
+describe('tools/list gate', () => {
+  it('owner (no consumer field) sees all tools, including owner-only ones', async () => {
+    const vault = makeVault();
+    const { client, close } = await connectedClient({ vaultRoot: vault });
+    try {
+      const { tools } = await client.listTools();
+      const names = tools.map(t => t.name);
+      expect(names).toContain('vault_plan_submit');
+      expect(names.length).toBeGreaterThanOrEqual(11);
+    } finally {
+      await close();
+    }
+  });
+
+  it("resolved consumer, vault:'r' — exactly the read/query surface, no owner-only tools", async () => {
+    const vault = makeVault();
+    const { client, close } = await connectedClient({ vaultRoot: vault, consumer: { id: 'c', vault: 'r', sources: [] } });
+    try {
+      const { tools } = await client.listTools();
+      const names = tools.map(t => t.name).sort();
+      expect(names).toEqual(['vault_query', 'vault_read', 'vault_search']);
+      expect(names).not.toContain('vault_plan_submit');
+    } finally {
+      await close();
+    }
+  });
+
+  it("resolved consumer, vault:'none' — only vault_query (no vault_read/vault_search, no owner-only tools)", async () => {
+    const vault = makeVault();
+    const { client, close } = await connectedClient({ vaultRoot: vault, consumer: { id: 'c', vault: 'none', sources: [] } });
+    try {
+      const { tools } = await client.listTools();
+      const names = tools.map(t => t.name);
+      expect(names).toEqual(['vault_query']);
+    } finally {
+      await close();
+    }
+  });
+
+  it('denied consumer — empty tool list', async () => {
+    const vault = makeVault();
+    const { client, close } = await connectedClient({ vaultRoot: vault, consumer: { denied: 'bad_token', id: 'x' } });
+    try {
+      const { tools } = await client.listTools();
+      expect(tools).toEqual([]);
     } finally {
       await close();
     }
