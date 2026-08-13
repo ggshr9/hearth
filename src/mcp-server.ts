@@ -33,6 +33,7 @@ import {
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { homedir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { loadSchema, schemaVersionHash, schemaLastModified } from './core/schema.ts';
 import { PendingStore } from './core/pending-store.ts';
 import { createKernel } from './core/vault-kernel.ts';
@@ -46,7 +47,8 @@ import { verifyAndConsume, TokenError } from './core/approval-token.ts';
 import { validateChangePlan, PlanValidationError } from './core/plan-validator.ts';
 import { ErrorCode } from './core/types.ts';
 import { AGENT_INSTRUCTIONS } from './core/agent-instructions.ts';
-import type { ConsumerIdentity } from './core/consumer-registry.ts';
+import { filterSourcesForConsumer, consumerCanReadVault, type ConsumerIdentity } from './core/consumer-registry.ts';
+import { loadSources } from './core/source-registry.ts';
 
 interface ServerContext {
   vaultRoot: string;
@@ -239,17 +241,42 @@ export function createMcpServer(ctx: ServerContext): Server {
 
       if (name === 'vault_query') {
         const question = String(args.question ?? '');
+        const consumer = ctx.consumer ?? null;
+        const qhash = 'sha256:' + createHash('sha256').update(question, 'utf8').digest('hex');
+
+        // Fail-closed: a denied consumer is refused for EVERY query (even
+        // pure-local), and neither the vault nor any source is touched.
+        if (consumer && 'denied' in consumer) {
+          await audit(ctx.vaultRoot, { event: 'query', initiated_by: 'mcp',
+            data: { consumer: consumer.id ?? 'unknown', denied: true, reason: consumer.denied,
+                    question_sha256: qhash, vault_included: false, sources_consulted: [] } }).catch(() => {});
+          return jsonContent({ answer: `permission denied: ${consumer.denied}`, hits: [], denied: true });
+        }
+
+        const grant = consumer as (import('./core/consumer-registry.ts').ResolvedConsumer | null);
         // Honesty guarantee: federate defaults to off. Absent or false takes
         // the exact same path hearth's local-only query has always taken —
         // no source-registry read, no federated MCP call, nothing that could
         // make vault_query answer with content hearth never verified itself.
         const federate = args.federate === true;
-        const result = federate
-          ? await (ctx.federatedQueryFn ?? federatedQuery)(ctx.vaultRoot, question, { stateDir: stateDirFor(ctx) })
-          : query(ctx.vaultRoot, question);
-        if (result.hits.length === 0) {
-          return { content: [{ type: 'text' as const, text: NO_ANSWER }] };
+        const vaultIncluded = consumerCanReadVault(grant);
+
+        let result;
+        let sourcesConsulted: string[] = [];
+        if (federate) {
+          result = await (ctx.federatedQueryFn ?? federatedQuery)(ctx.vaultRoot, question, { stateDir: stateDirFor(ctx), consumer: grant });
+          sourcesConsulted = filterSourcesForConsumer(loadSources(stateDirFor(ctx)), grant).map(s => s.id);
+        } else if (vaultIncluded) {
+          result = query(ctx.vaultRoot, question);
+        } else {
+          result = { question, hits: [], no_answer_message: NO_ANSWER };
         }
+
+        await audit(ctx.vaultRoot, { event: 'query', initiated_by: 'mcp',
+          data: { consumer: grant?.id ?? 'owner', denied: false, question_sha256: qhash,
+                  vault_included: vaultIncluded, sources_consulted: sourcesConsulted } }).catch(() => {});
+
+        if (result.hits.length === 0) return { content: [{ type: 'text' as const, text: NO_ANSWER }] };
         return jsonContent(result);
       }
 

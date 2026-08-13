@@ -22,6 +22,7 @@ export type AuditEvent =
   | 'lint.run'
   | 'doctor.run'
   | 'mcp.tool_called'
+  | 'query'
   | 'approval_token.issued'
   | 'approval_token.consumed'
   | 'approval_token.rejected';
