@@ -5,9 +5,14 @@
 // response) degrades to [] rather than throwing or hanging hearth's own
 // query(). Local vault query must never be at the mercy of an external MCP
 // server's behavior.
+//
+// buildClient() (the test seam) is deliberately SYNCHRONOUS, mirroring the
+// real implementation: the handle (and its close()) must exist before
+// connect() is ever awaited, so a source that hangs during connect/handshake
+// can still be torn down via close() instead of orphaning its child process.
 
 import { describe, expect, it } from 'vitest';
-import { queryFederatedSource } from '../src/core/federated-client.ts';
+import { queryFederatedSource, type MinimalMcpClient } from '../src/core/federated-client.ts';
 import type { FederatedSource } from '../src/core/source-registry.ts';
 
 function makeSource(overrides: Partial<FederatedSource> = {}): FederatedSource {
@@ -24,7 +29,8 @@ describe('queryFederatedSource: fail-open MCP client', () => {
     const source = makeSource();
     let closed = false;
     const hits = await queryFederatedSource(source, 'when is the trip?', {
-      makeClient: async () => ({
+      buildClient: (): MinimalMcpClient => ({
+        connect: async () => {},
         call: async (tool, args) => {
           expect(tool).toBe('search_messages');
           expect(args).toEqual({ question: 'when is the trip?' });
@@ -79,7 +85,8 @@ describe('queryFederatedSource: fail-open MCP client', () => {
     const source = makeSource();
     let closed = false;
     const hits = await queryFederatedSource(source, 'question', {
-      makeClient: async () => ({
+      buildClient: (): MinimalMcpClient => ({
+        connect: async () => {},
         call: async () => 'not valid json {{{',
         close: async () => {
           closed = true;
@@ -93,7 +100,8 @@ describe('queryFederatedSource: fail-open MCP client', () => {
   it('well-formed JSON with the wrong shape → [] (no throw)', async () => {
     const source = makeSource();
     const hits = await queryFederatedSource(source, 'question', {
-      makeClient: async () => ({
+      buildClient: (): MinimalMcpClient => ({
+        connect: async () => {},
         call: async () => JSON.stringify({ notHits: 'oops' }),
         close: async () => {},
       }),
@@ -101,21 +109,40 @@ describe('queryFederatedSource: fail-open MCP client', () => {
     expect(hits).toEqual([]);
   });
 
-  it('makeClient itself throwing (connect failure) → [] (no throw)', async () => {
+  it('buildClient itself throwing (e.g. bad transport config) → [] (no throw)', async () => {
     const source = makeSource();
     const hits = await queryFederatedSource(source, 'question', {
-      makeClient: async () => {
-        throw new Error('ECONNREFUSED');
+      buildClient: (): MinimalMcpClient => {
+        throw new Error('spawn ENOENT');
       },
     });
     expect(hits).toEqual([]);
+  });
+
+  it('connect() rejecting (handshake failure) → [] and close() is still called', async () => {
+    const source = makeSource();
+    let closed = false;
+    const hits = await queryFederatedSource(source, 'question', {
+      buildClient: (): MinimalMcpClient => ({
+        connect: async () => {
+          throw new Error('ECONNREFUSED');
+        },
+        call: async () => '',
+        close: async () => {
+          closed = true;
+        },
+      }),
+    });
+    expect(hits).toEqual([]);
+    expect(closed).toBe(true);
   });
 
   it('a call() that rejects → [] and close() is still called', async () => {
     const source = makeSource();
     let closed = false;
     const hits = await queryFederatedSource(source, 'question', {
-      makeClient: async () => ({
+      buildClient: (): MinimalMcpClient => ({
+        connect: async () => {},
         call: async () => {
           throw new Error('boom');
         },
@@ -131,7 +158,8 @@ describe('queryFederatedSource: fail-open MCP client', () => {
   it('a close() that itself throws is swallowed (still returns hits)', async () => {
     const source = makeSource();
     const hits = await queryFederatedSource(source, 'question', {
-      makeClient: async () => ({
+      buildClient: (): MinimalMcpClient => ({
+        connect: async () => {},
         call: async () => JSON.stringify({ hits: [{ claim_text: 'ok' }] }),
         close: async () => {
           throw new Error('close failed');
@@ -147,7 +175,8 @@ describe('queryFederatedSource: fail-open MCP client', () => {
     const start = Date.now();
     const hits = await queryFederatedSource(source, 'question', {
       timeoutMs: 50,
-      makeClient: async () => ({
+      buildClient: (): MinimalMcpClient => ({
+        connect: async () => {},
         call: () => new Promise<string>(() => {}), // never resolves
         close: async () => {
           closed = true;
@@ -157,6 +186,29 @@ describe('queryFederatedSource: fail-open MCP client', () => {
     const elapsed = Date.now() - start;
     expect(hits).toEqual([]);
     expect(elapsed).toBeLessThan(1000);
+    expect(closed).toBe(true);
+  });
+
+  it('a connect() that hangs (handshake never answers) past timeoutMs → [] AND close() is still called (regression: must not orphan the child)', async () => {
+    const source = makeSource();
+    let closed = false;
+    const start = Date.now();
+    const hits = await queryFederatedSource(source, 'question', {
+      timeoutMs: 50,
+      buildClient: (): MinimalMcpClient => ({
+        connect: () => new Promise<void>(() => {}), // hangs forever — simulates a spawned child that never answers `initialize`
+        call: async () => JSON.stringify({ hits: [{ claim_text: 'unreachable' }] }),
+        close: async () => {
+          closed = true;
+        },
+      }),
+    });
+    const elapsed = Date.now() - start;
+    expect(hits).toEqual([]);
+    expect(elapsed).toBeLessThan(1000);
+    // The critical regression check: even though connect() never resolved,
+    // the handle must already exist in the outer scope so close() (which
+    // tears down the spawned child) is still invoked.
     expect(closed).toBe(true);
   });
 });
