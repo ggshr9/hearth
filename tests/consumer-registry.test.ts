@@ -9,6 +9,7 @@ import {
   loadConsumers, hashToken, filterSourcesForConsumer, consumerCanReadVault,
 } from '../src/core/consumer-registry.ts';
 import type { FederatedSource } from '../src/core/source-registry.ts';
+import { resolveServeConsumer } from '../src/cli/index.ts';
 
 function tmp(): string { return mkdtempSync(join(tmpdir(), 'hearth-consumers-')); }
 
@@ -74,4 +75,15 @@ test('filterSourcesForConsumer + consumerCanReadVault honor grants', () => {
   expect(consumerCanReadVault(null)).toBe(true);
   expect(consumerCanReadVault({ id: 'c', vault: 'r', sources: '*' })).toBe(true);
   expect(consumerCanReadVault({ id: 'c', vault: 'none', sources: [] })).toBe(false);
+});
+
+test('resolveServeConsumer: owner when nothing passed, denied on partial creds, grant on valid', () => {
+  const dir = tmp();
+  const { token } = addConsumer({ id: 'codex', sources: '*', vault: 'r', stateDir: dir });
+  expect(resolveServeConsumer({ stateDir: dir })).toBe(null);                                  // owner-full
+  expect(resolveServeConsumer({ id: 'codex', stateDir: dir })).toEqual({ denied: 'bad_token', id: 'codex' }); // id, no token
+  expect(resolveServeConsumer({ token: 'x', stateDir: dir })).toEqual({ denied: 'bad_token' }); // token, no id
+  const ok = resolveServeConsumer({ id: 'codex', token, stateDir: dir });
+  expect('denied' in (ok as any)).toBe(false);
+  expect((ok as any).id).toBe('codex');
 });

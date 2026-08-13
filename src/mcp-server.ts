@@ -46,9 +46,17 @@ import { verifyAndConsume, TokenError } from './core/approval-token.ts';
 import { validateChangePlan, PlanValidationError } from './core/plan-validator.ts';
 import { ErrorCode } from './core/types.ts';
 import { AGENT_INSTRUCTIONS } from './core/agent-instructions.ts';
+import type { ConsumerIdentity } from './core/consumer-registry.ts';
 
 interface ServerContext {
   vaultRoot: string;
+  /**
+   * Phase 3: the authenticated consumer this server process serves.
+   * undefined/null = owner-full (backward-compatible; existing spawns and
+   * the owner's own tools). A ResolvedConsumer scopes the query path; a
+   * DeniedConsumer marker makes every vault_query fail closed.
+   */
+  consumer?: ConsumerIdentity;
   /** Override hearth state dir (pending queue, channel inbox, and the
    *  federated source registry's sources.json). Defaults to ~/.hearth.
    *  Primarily for tests; production stdio startup leaves this unset and
@@ -488,8 +496,8 @@ function vaultMap(vaultRoot: string): { dirs: { path: string; mdFiles: number }[
   return { dirs: out.sort((a, b) => a.path.localeCompare(b.path)) };
 }
 
-export async function startStdioServer(vaultRoot: string): Promise<void> {
-  const server = createMcpServer({ vaultRoot });
+export async function startStdioServer(vaultRoot: string, consumer?: ConsumerIdentity): Promise<void> {
+  const server = createMcpServer({ vaultRoot, consumer });
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

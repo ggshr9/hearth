@@ -26,6 +26,7 @@ import { runDoctor, renderDoctorReport } from './doctor.ts';
 import { startReviewServer } from '../review-server.ts';
 import { TunnelManager } from '../tunnel-manager.ts';
 import { startStdioServer } from '../mcp-server.ts';
+import { resolveConsumer, type ConsumerIdentity } from '../core/consumer-registry.ts';
 import { audit, readAudit, parseSince } from '../core/audit.ts';
 import { issueToken } from '../core/approval-token.ts';
 import { issueCaptureToken } from '../core/capture-token.ts';
@@ -353,6 +354,14 @@ function cmdDoctor(_positionals: string[], values: Record<string, string | boole
   if (!report.ok) process.exit(1);
 }
 
+export function resolveServeConsumer(opts: { id?: string; token?: string; stateDir?: string }): ConsumerIdentity {
+  const id = opts.id?.trim() || undefined;
+  const token = opts.token || undefined;
+  if (!id && !token) return null;                                  // owner-full
+  if (!id || !token) return { denied: 'bad_token', ...(id ? { id } : {}) }; // both required together
+  return resolveConsumer(id, token, opts.stateDir);
+}
+
 async function cmdMcp(positionals: string[], values: Record<string, string | boolean | undefined>): Promise<void> {
   const sub = positionals[0];
   if (sub !== 'serve') fail(`mcp: unknown subcommand "${sub}". expected: serve`);
@@ -362,7 +371,17 @@ async function cmdMcp(positionals: string[], values: Record<string, string | boo
   }
   // No stdout chatter — MCP uses stdout for protocol. Log to stderr only.
   process.stderr.write(`hearth mcp serve: vault=${vault}\n`);
-  await startStdioServer(vault);
+  const consumer = resolveServeConsumer({
+    id: (values.consumer as string | undefined) ?? process.env.HEARTH_CONSUMER_ID,
+    token: (values['consumer-token'] as string | undefined) ?? process.env.HEARTH_CONSUMER_TOKEN,
+    // stateDir omitted → ~/.hearth (same place addConsumer writes)
+  });
+  if (consumer && 'denied' in consumer) {
+    process.stderr.write(`hearth mcp serve: consumer auth failed (${consumer.denied}); serving in DENIED mode (all queries refused)\n`);
+  } else if (consumer) {
+    process.stderr.write(`hearth mcp serve: consumer=${consumer.id} vault=${consumer.vault} sources=${consumer.sources === '*' ? '*' : consumer.sources.join(',')}\n`);
+  }
+  await startStdioServer(vault, consumer);
 }
 
 function cmdLog(positionals: string[], values: Record<string, string | boolean | undefined>): void {
@@ -524,6 +543,8 @@ async function main(): Promise<void> {
       'state-dir': { type: 'string' },
       ttl: { type: 'string' },
       name: { type: 'string' },
+      consumer: { type: 'string' },
+      'consumer-token': { type: 'string' },
     },
     allowPositionals: true,
     strict: false,
