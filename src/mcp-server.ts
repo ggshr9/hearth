@@ -47,8 +47,7 @@ import { verifyAndConsume, TokenError } from './core/approval-token.ts';
 import { validateChangePlan, PlanValidationError } from './core/plan-validator.ts';
 import { ErrorCode } from './core/types.ts';
 import { AGENT_INSTRUCTIONS } from './core/agent-instructions.ts';
-import { filterSourcesForConsumer, consumerCanReadVault, type ConsumerIdentity } from './core/consumer-registry.ts';
-import { loadSources } from './core/source-registry.ts';
+import { consumerCanReadVault, type ConsumerIdentity } from './core/consumer-registry.ts';
 
 interface ServerContext {
   vaultRoot: string;
@@ -221,6 +220,35 @@ export function createMcpServer(ctx: ServerContext): Server {
       data: { tool: name, args_keys: Object.keys(args) },
     }).catch(() => {});
 
+    // Phase 3 consumer gate. Owner (ctx.consumer == null) is unrestricted.
+    // A third-party consumer is a SCOPED READ client: denied => no tool at
+    // all; a resolved grant => only the read/query surface, and pure vault
+    // reads require vault:'r'. This runs before every tool so no vault-reading
+    // tool (vault_read/vault_search/vault_query) can route around the broker.
+    const gateConsumer = ctx.consumer ?? null;
+    if (gateConsumer !== null) {
+      const denyAudit = (reason: string) =>
+        audit(ctx.vaultRoot, { event: 'query', initiated_by: 'mcp',
+          data: { consumer: ('id' in gateConsumer ? gateConsumer.id : undefined) ?? 'unknown',
+                  denied: true, reason, tool: name } }).catch(() => {});
+      if ('denied' in gateConsumer) {
+        await denyAudit(gateConsumer.denied);
+        return errorContent('PERMISSION_DENIED', `permission denied: ${gateConsumer.denied}`,
+          'This consumer failed authentication; no tool is available.');
+      }
+      const CONSUMER_TOOLS = new Set(['vault_query', 'vault_read', 'vault_search']);
+      if (!CONSUMER_TOOLS.has(name)) {
+        await denyAudit('owner_only_tool');
+        return errorContent('PERMISSION_DENIED',
+          `tool "${name}" is owner-only; consumer "${gateConsumer.id}" may not call it`);
+      }
+      if ((name === 'vault_read' || name === 'vault_search') && !consumerCanReadVault(gateConsumer)) {
+        await denyAudit('no_vault_grant');
+        return errorContent('PERMISSION_DENIED',
+          `consumer "${gateConsumer.id}" has no vault read grant (vault:'none')`);
+      }
+    }
+
     try {
       const schema = loadSchema(ctx.vaultRoot);
 
@@ -246,11 +274,15 @@ export function createMcpServer(ctx: ServerContext): Server {
 
         // Fail-closed: a denied consumer is refused for EVERY query (even
         // pure-local), and neither the vault nor any source is touched.
+        // (Defense-in-depth: the hoisted consumer gate above already refuses
+        // a denied consumer before this handler is reached, so this branch
+        // is normally unreachable — kept in case that gate is ever bypassed
+        // or this function is called some other way.)
         if (consumer && 'denied' in consumer) {
           await audit(ctx.vaultRoot, { event: 'query', initiated_by: 'mcp',
             data: { consumer: consumer.id ?? 'unknown', denied: true, reason: consumer.denied,
                     question_sha256: qhash, vault_included: false, sources_consulted: [] } }).catch(() => {});
-          return jsonContent({ answer: `permission denied: ${consumer.denied}`, hits: [], denied: true });
+          return errorContent('PERMISSION_DENIED', `permission denied: ${consumer.denied}`);
         }
 
         const grant = consumer as (import('./core/consumer-registry.ts').ResolvedConsumer | null);
@@ -262,15 +294,18 @@ export function createMcpServer(ctx: ServerContext): Server {
         const vaultIncluded = consumerCanReadVault(grant);
 
         let result;
-        let sourcesConsulted: string[] = [];
         if (federate) {
           result = await (ctx.federatedQueryFn ?? federatedQuery)(ctx.vaultRoot, question, { stateDir: stateDirFor(ctx), consumer: grant });
-          sourcesConsulted = filterSourcesForConsumer(loadSources(stateDirFor(ctx)), grant).map(s => s.id);
         } else if (vaultIncluded) {
           result = query(ctx.vaultRoot, question);
         } else {
           result = { question, hits: [], no_answer_message: NO_ANSWER };
         }
+        // Report exactly what federatedQuery itself consulted (post
+        // allowlist-filtering) rather than re-reading the source registry a
+        // second time here — two independent reads of a mutable registry
+        // can diverge and make the audit lie about what was queried.
+        const sourcesConsulted = result.sources_consulted ?? [];
 
         await audit(ctx.vaultRoot, { event: 'query', initiated_by: 'mcp',
           data: { consumer: grant?.id ?? 'owner', denied: false, question_sha256: qhash,

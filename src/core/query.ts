@@ -34,6 +34,13 @@ export interface QueryResult {
   hits: QueryHit[];
   /** When hits is empty, this is the verbatim string callers must show. */
   no_answer_message: typeof NO_ANSWER;
+  /** federatedQuery() only: the source ids it actually consulted, post
+   *  consumer-allowlist filtering. Lets callers (e.g. the audit write in
+   *  mcp-server.ts) report the source list federatedQuery itself used,
+   *  rather than re-reading the source registry a second time — two reads
+   *  of a mutable registry can diverge and make the audit lie. Left
+   *  undefined by plain query(). */
+  sources_consulted?: string[];
 }
 
 function tokenize(text: string): string[] {
@@ -155,5 +162,5 @@ export async function federatedQuery(
     .map(hit => ({ ...hit, match_score: clamp(hit.match_score) }))
     .sort((a, b) => b.match_score - a.match_score);
 
-  return { question, hits, no_answer_message: NO_ANSWER };
+  return { question, hits, no_answer_message: NO_ANSWER, sources_consulted: sources.map(s => s.id) };
 }
