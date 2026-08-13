@@ -32,7 +32,7 @@ import { PendingStore } from './core/pending-store.ts';
 import { createKernel } from './core/vault-kernel.ts';
 import { buildClaimIndex } from './core/citations.ts';
 import { lint } from './core/lint.ts';
-import { query, NO_ANSWER } from './core/query.ts';
+import { query, federatedQuery, NO_ANSWER } from './core/query.ts';
 import { runDoctor } from './cli/doctor.ts';
 import { ingestFromChannel } from './runtime.ts';
 import { audit } from './core/audit.ts';
@@ -42,6 +42,22 @@ import { AGENT_INSTRUCTIONS } from './core/agent-instructions.ts';
 
 interface ServerContext {
   vaultRoot: string;
+  /**
+   * Phase 2a (HF3): state dir federatedQuery()/loadSources() use to find
+   * <stateDir>/sources.json. Optional override, exposed mainly for tests;
+   * production leaves this undefined and lets federatedQuery/loadSources
+   * fall through to their own default (join(homedir(), '.hearth') —
+   * source-registry's default).
+   */
+  stateDir?: string;
+  /**
+   * Phase 2a (HF3) test seam: override the federatedQuery function used by
+   * the vault_query `federate: true` path. Defaults to the real
+   * federatedQuery. Lets tests assert "no source is consulted" as a hard
+   * fact (call count) when federate is absent/false, without a mocking
+   * library or a real MCP source.
+   */
+  federatedQueryFn?: typeof federatedQuery;
 }
 
 function jsonContent(obj: unknown): { content: { type: 'text'; text: string }[] } {
@@ -84,11 +100,14 @@ export function createMcpServer(ctx: ServerContext): Server {
       },
       {
         name: 'vault_query',
-        description: 'Conservative query: returns verified claims with citations, or the literal "no answer found in vault".',
+        description: 'Conservative query: returns verified claims with citations, or the literal "no answer found in vault". Set federate:true to also merge in answers from registered federated sources (labeled origin:"federated", never re-verified by hearth).',
         inputSchema: {
           type: 'object',
           required: ['question'],
-          properties: { question: { type: 'string' } },
+          properties: {
+            question: { type: 'string' },
+            federate: { type: 'boolean' },
+          },
         },
       },
       {
@@ -173,7 +192,15 @@ export function createMcpServer(ctx: ServerContext): Server {
       }
 
       if (name === 'vault_query') {
-        const result = query(ctx.vaultRoot, String(args.question ?? ''));
+        const question = String(args.question ?? '');
+        // Honesty guarantee: federate defaults to off. Absent or false takes
+        // the exact same path hearth's local-only query has always taken —
+        // no source-registry read, no federated MCP call, nothing that could
+        // make vault_query answer with content hearth never verified itself.
+        const federate = args.federate === true;
+        const result = federate
+          ? await (ctx.federatedQueryFn ?? federatedQuery)(ctx.vaultRoot, question, { stateDir: ctx.stateDir })
+          : query(ctx.vaultRoot, question);
         if (result.hits.length === 0) {
           return { content: [{ type: 'text' as const, text: NO_ANSWER }] };
         }

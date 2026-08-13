@@ -7,6 +7,8 @@
 // "doesn't fabricate" property, not to win a benchmark.
 
 import { buildClaimIndex, type ClaimRecord } from './citations.ts';
+import { loadSources, type FederatedSource } from './source-registry.ts';
+import { queryFederatedSource } from './federated-client.ts';
 
 export const NO_ANSWER = 'no answer found in vault';
 
@@ -80,6 +82,67 @@ export function query(vaultRoot: string, question: string, opts: { limit?: numbe
     origin: 'vault',
     verified_by: 'vault',
   }));
+
+  return { question, hits, no_answer_message: NO_ANSWER };
+}
+
+/**
+ * federatedQuery — Phase 2a (HF3) router.
+ *
+ * Merges hearth's own local query() hits with hits pulled from every
+ * registered federated source (source-registry.ts + federated-client.ts).
+ * This function does exactly one thing beyond concatenation: it clamps every
+ * hit's match_score into [0,1] so local and federated scores sit on a common
+ * scale, then sorts the merged list by that score, descending.
+ *
+ * It deliberately does NOT re-verify or re-score federated hits against
+ * buildClaimIndex/verifyClaim — those hits already carry origin:'federated'
+ * and verified_by:<source id>, i.e. someone else's vault already vouched for
+ * them. Hearth cannot verify claims it never ingested; feeding federated
+ * hits through its own citation pipeline would either throw (they're not in
+ * the index) or, worse, silently relabel them as hearth-verified. Local hits
+ * keep origin:'vault'/verified_by:'vault' exactly as query() produced them.
+ *
+ * Fail-open: queryFederatedSource() already degrades any single source's
+ * failure (connect error, timeout, malformed response) to []. The loop below
+ * additionally wraps each call in try/catch so that even a caller-supplied
+ * sourceQueryFn (test seam) — or a future source-registry surprise — that
+ * throws directly cannot take down the whole federated query; it degrades to
+ * [] for that source and the rest proceeds normally.
+ */
+export async function federatedQuery(
+  vaultRoot: string,
+  question: string,
+  opts?: {
+    stateDir?: string;
+    limit?: number;
+    minScore?: number;
+    queryFn?: typeof query;
+    sourceQueryFn?: (source: FederatedSource, question: string) => Promise<QueryHit[]>;
+  },
+): Promise<QueryResult> {
+  const queryFn = opts?.queryFn ?? query;
+  const sourceQueryFn = opts?.sourceQueryFn ?? queryFederatedSource;
+
+  const local = queryFn(vaultRoot, question, { limit: opts?.limit, minScore: opts?.minScore }).hits;
+
+  const sources = loadSources(opts?.stateDir);
+  const federated: QueryHit[] = [];
+  for (const source of sources) {
+    try {
+      federated.push(...(await sourceQueryFn(source, question)));
+    } catch (err) {
+      // Defensive only: queryFederatedSource itself is already fail-open.
+      // This guards against a non-standard sourceQueryFn (tests, or a
+      // future source-registry surprise) throwing directly.
+      console.warn(`[hearth] federatedQuery: source "${source.id}" threw unexpectedly (should have fail-opened):`, err);
+    }
+  }
+
+  const clamp = (score: number): number => Math.max(0, Math.min(1, score));
+  const hits = [...local, ...federated]
+    .map(hit => ({ ...hit, match_score: clamp(hit.match_score) }))
+    .sort((a, b) => b.match_score - a.match_score);
 
   return { question, hits, no_answer_message: NO_ANSWER };
 }
