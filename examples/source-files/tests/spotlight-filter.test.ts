@@ -16,7 +16,7 @@ const mixed = [
 ];
 
 test('default (DOC_EXTS) keeps documents, drops junk dirs AND source code', () => {
-  const out = filterCandidates(mixed, { allowExts: DOC_EXTS });
+  const out = filterCandidates(mixed, { allowExts: DOC_EXTS as string[] });
   expect(out).toEqual([
     '/U/me/Documents/notes/q3.pdf',
     '/U/me/Documents/report.docx',
@@ -35,7 +35,7 @@ test('allowExts null keeps source code but STILL drops junk dirs', () => {
 });
 
 test('exclude adds a junk segment (case-insensitive)', () => {
-  const out = filterCandidates(['/U/me/Documents/Secret/a.pdf', '/U/me/Documents/ok/b.pdf'], { allowExts: DOC_EXTS, exclude: ['secret'] });
+  const out = filterCandidates(['/U/me/Documents/Secret/a.pdf', '/U/me/Documents/ok/b.pdf'], { allowExts: DOC_EXTS as string[], exclude: ['secret'] });
   expect(out).toEqual(['/U/me/Documents/ok/b.pdf']);
 });
 
@@ -48,7 +48,7 @@ test('DOC_EXTS excludes source-code extensions; JUNK_SEGMENTS covers node_module
 test('terminal filenames containing "cache" are kept — only cache DIRECTORIES are junk', () => {
   const out = filterCandidates(
     ['/U/me/Documents/cache-strategy.pdf', '/U/me/Documents/Cache Invalidation Notes.docx'],
-    { allowExts: DOC_EXTS },
+    { allowExts: DOC_EXTS as string[] },
   );
   expect(out).toEqual([
     '/U/me/Documents/cache-strategy.pdf',
@@ -67,7 +67,7 @@ test('a cache DIRECTORY segment still drops its contents', () => {
 test('.cache directory segment is dropped', () => {
   const out = filterCandidates(
     ['/U/me/Documents/proj/.cache/x.md'],
-    { allowExts: DOC_EXTS },
+    { allowExts: DOC_EXTS as string[] },
   );
   expect(out).toEqual([]);
 });
