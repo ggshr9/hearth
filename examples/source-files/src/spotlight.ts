@@ -21,7 +21,9 @@ export async function mdfind(
   opts?: { onlyIn?: string[]; limit?: number },
   exec: ExecFn = defaultExec,
 ): Promise<string[]> {
-  const q = question.trim();
+  // mdfind treats an argv element starting with '-' as a flag (no '--' support),
+  // so a leading-dash query would error out and silently return nothing. Strip them.
+  const q = question.trim().replace(/^[-\s]+/, '');
   if (!q) return [];
   const argv: string[] = [];
   for (const dir of opts?.onlyIn ?? []) argv.push('-onlyin', dir);
@@ -37,9 +39,9 @@ export async function mdfind(
   return paths.slice(0, opts?.limit ?? 40);
 }
 
-function displayPath(abs: string): string {
+export function displayPath(abs: string): string {
   const home = homedir();
-  return abs.startsWith(home) ? '~' + abs.slice(home.length) : abs;
+  return (abs === home || abs.startsWith(home + '/')) ? '~' + abs.slice(home.length) : abs;
 }
 
 export async function hitsFromPaths(paths: string[], question: string): Promise<Hit[]> {

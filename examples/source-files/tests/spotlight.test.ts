@@ -1,9 +1,9 @@
 // tests/spotlight.test.ts
 import { test, expect } from 'bun:test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
-import { mdfind, hitsFromPaths } from '../src/spotlight.ts';
+import { mdfind, hitsFromPaths, displayPath } from '../src/spotlight.ts';
 
 test('mdfind builds -onlyin argv + query, parses newline paths, caps at limit', async () => {
   let seen: string[] = [];
@@ -16,6 +16,21 @@ test('mdfind builds -onlyin argv + query, parses newline paths, caps at limit', 
 test('mdfind returns [] on empty question and on exec failure (fail-open)', async () => {
   expect(await mdfind('   ', {}, async () => 'x')).toEqual([]);
   expect(await mdfind('q', {}, async () => { throw new Error('boom'); })).toEqual([]);
+});
+
+test('mdfind strips leading dashes so a leading-dash query does not error out as a flag', async () => {
+  let seen: string[] = [];
+  const fakeExec = async (argv: string[]) => { seen = argv; return ''; };
+  await mdfind('-revenue', { onlyIn: ['/d'] }, fakeExec);
+  expect(seen[seen.length - 1]).toBe('revenue');
+});
+
+test('mdfind returns [] without calling exec when query is all dashes', async () => {
+  let called = false;
+  const fakeExec = async (argv: string[]) => { called = true; return ''; };
+  const paths = await mdfind('---', {}, fakeExec);
+  expect(paths).toEqual([]);
+  expect(called).toBe(false);
 });
 
 test('hitsFromPaths extracts + ranks real temp files, skips unextractable', async () => {
@@ -34,4 +49,11 @@ test('mdfind real smoke — runs and returns an array (fail-open if mdfind absen
   const dir = mkdtempSync(join(tmpdir(), 'sf-spot-real-'));
   const paths = await mdfind('the', { onlyIn: [dir], limit: 5 });
   expect(Array.isArray(paths)).toBe(true);
+});
+
+test('displayPath home-relativizes paths under home, but leaves prefix-colliding siblings unchanged', () => {
+  const home = homedir();
+  expect(displayPath(join(home, 'docs', 'f.txt'))).toBe('~' + join('/docs', 'f.txt'));
+  const sibling = home + '-backup/secret.txt';
+  expect(displayPath(sibling)).toBe(sibling);
 });
