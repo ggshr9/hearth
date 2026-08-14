@@ -1,6 +1,7 @@
 // Keyword search over the in-memory index. Honest token-overlap scoring (no
-// embeddings — matches hearth's own conservative query). Hits are rank-
-// normalized 1/(1+index) so they interleave fairly in hearth's cross-source merge.
+// embeddings — mirrors hearth's own tokenizer, see src/core/query.ts). Hits
+// are rank-normalized 1/(1+index) so they interleave fairly in hearth's
+// cross-source merge.
 import { basename } from 'node:path';
 import type { IndexRecord } from './index-store.ts';
 
@@ -13,12 +14,7 @@ export interface Hit {
 }
 
 export function tokenize(text: string): string[] {
-  const out: string[] = [];
-  for (const m of text.toLowerCase().matchAll(/[a-z0-9]+|[一-鿿]/g)) {
-    const t = m[0];
-    if (/[一-鿿]/.test(t) || t.length >= 2) out.push(t);
-  }
-  return out;
+  return text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(t => t.length >= 2);
 }
 
 export function search(index: IndexRecord[], question: string, limit = 8): Hit[] {

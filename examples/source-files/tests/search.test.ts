@@ -6,9 +6,9 @@ function rec(relPath: string, text: string, isMedia = false): IndexRecord {
   return { relPath, rootLabel: 'root', absPath: '/x/' + relPath, text, isMedia };
 }
 
-test('tokenize lowercases, splits on non-alphanumeric, keeps CJK chars, drops 1-char latin', () => {
+test('tokenize lowercases, splits on non-word chars, keeps CJK as multi-char blocks, drops 1-char latin', () => {
   expect(tokenize('Hello, World! a')).toEqual(['hello', 'world']);
-  expect(tokenize('营收 forecast')).toContain('营');
+  expect(tokenize('营收 forecast')).toContain('营收');
   expect(tokenize('营收 forecast')).toContain('forecast');
 });
 

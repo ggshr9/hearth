@@ -42,3 +42,24 @@ test('files_query on a no-match question returns {hits:[]}', async () => {
   expect(JSON.parse(res.content[0].text)).toEqual({ hits: [] });
   await client.close();
 });
+
+test('calling an unknown tool name returns isError with {hits:[]}, no throw', async () => {
+  const server = createFilesServer([rec('a.md', 'cats')], 'files_query');
+  const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'test', version: '0' }, { capabilities: {} });
+  await Promise.all([server.connect(serverT), client.connect(clientT)]);
+  const res: any = await client.callTool({ name: 'not_a_real_tool', arguments: { question: 'anything' } });
+  expect(res.isError).toBeTruthy();
+  expect(JSON.parse(res.content[0].text)).toEqual({ hits: [] });
+  await client.close();
+});
+
+test('an empty index returns {hits:[]} for any question', async () => {
+  const server = createFilesServer([], 'files_query');
+  const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'test', version: '0' }, { capabilities: {} });
+  await Promise.all([server.connect(serverT), client.connect(clientT)]);
+  const res: any = await client.callTool({ name: 'files_query', arguments: { question: 'anything' } });
+  expect(JSON.parse(res.content[0].text)).toEqual({ hits: [] });
+  await client.close();
+});

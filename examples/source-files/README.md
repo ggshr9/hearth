@@ -17,6 +17,8 @@ bun src/server.ts --root /path/to/docs [--root /path/to/more-docs] [--name files
 - `--root` is repeatable — pass it once per directory you want indexed. Each
   root is walked once at startup (dotfiles/dotdirs, `node_modules`, `.git`,
   and other build/VCS directories are skipped; oversized files are skipped).
+  Symlinked files and directories are not followed/indexed (keeps the walk
+  loop-safe).
 - `--name` overrides the exposed tool name (default `files_query`) — useful
   if you're registering more than one instance of this province under
   different labels.
@@ -25,19 +27,21 @@ bun src/server.ts --root /path/to/docs [--root /path/to/more-docs] [--name files
 
 ## Register it with hearth
 
-Add an entry to `~/.hearth/sources.json`:
+`~/.hearth/sources.json` is a JSON array; add this element:
 
 ```json
-{
-  "id": "files",
-  "description": "Local files (txt/md + Office/PDF)",
-  "transport": {
-    "kind": "stdio",
-    "command": "bun",
-    "args": ["/abs/path/to/examples/source-files/src/server.ts", "--root", "/abs/path/to/your/docs"]
-  },
-  "query_tool": "files_query"
-}
+[
+  {
+    "id": "files",
+    "description": "Local files (txt/md + Office/PDF)",
+    "transport": {
+      "kind": "stdio",
+      "command": "bun",
+      "args": ["/abs/path/to/examples/source-files/src/server.ts", "--root", "/abs/path/to/your/docs"]
+    },
+    "query_tool": "files_query"
+  }
+]
 ```
 
 Use absolute paths for both the server entrypoint and the `--root` directory
