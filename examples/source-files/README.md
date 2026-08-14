@@ -58,21 +58,54 @@ This province ships two entrypoints:
   **macOS only.**
 
 ```bash
-bun src/spotlight-server.ts [--onlyin /path/to/docs] [--limit 40] [--name files_query]
+bun src/spotlight-server.ts [--onlyin /path/to/docs] [--limit 40] [--name files_query] \
+  [--ext pdf,md] [--all-types] [--exclude some-substr]
 ```
 
 - `--onlyin` is repeatable and scopes `mdfind` to specific directories;
   omit it to search the whole disk (subject to Spotlight indexing and
   Privacy exclusions — anything under System Settings → Siri & Spotlight →
   Spotlight Privacy is invisible to `mdfind`, by design).
-- `--limit` caps how many Spotlight-matched candidates get opened and
-  extracted per query (default 40) — tune it down if queries feel slow.
+- `--limit` caps how many results are returned per query (default 40).
+  Internally, a larger candidate pool (`max(limit * 6, 200)`) is pulled from
+  `mdfind` and filtered *before* this limit is applied, so junk/code matches
+  can't crowd real documents out of the budget.
 - `--name` overrides the exposed tool name, same as walk mode.
 - Same `stdout`/`stderr` discipline as walk mode: all diagnostics go to
   `stderr`.
 
+### Filtering
+
+Whole-disk Spotlight recall needs scoping, or `node_modules`, build output,
+and source code drown out the documents you actually want. Two filters are
+always applied, and one is on by default:
+
+- **Junk directories — always excluded.** Any candidate whose path passes
+  through a build/dependency/cache directory (`node_modules`, `.git`,
+  `dist`, `build`, `target`, `.next`, `__pycache__`, `.venv`, anything
+  containing "cache", etc. — see `JUNK_SEGMENTS` in
+  [`src/spotlight.ts`](./src/spotlight.ts)) is dropped. This can't be
+  turned off; `--exclude <substr>` (repeatable) adds more path segments to
+  the junk set on top of it.
+- **Document types — the default.** With no flags, only document/note
+  extensions are returned — office docs (`.pdf`, `.doc`/`.docx`,
+  `.ppt`/`.pptx`, `.xls`/`.xlsx`, `.pages`/`.key`/`.numbers`, `.odt`/`.ods`/`.odp`)
+  and plain-text/note formats (`.txt`, `.md`/`.markdown`, `.rtf`/`.rtfd`,
+  `.csv`, `.tex`) — see `DOC_EXTS` in [`src/spotlight.ts`](./src/spotlight.ts)
+  for the exact list. Source code, configs, and other non-document types are
+  filtered out automatically; **no flags are needed for this — it's the
+  out-of-the-box behavior.**
+  - `--ext <csv>` replaces the allowlist with your own extensions (e.g.
+    `--ext pdf,md`).
+  - `--all-types` disables the type allowlist entirely — every extension is
+    returned (junk directories are still excluded).
+
+- `--exclude` and `--ext`/`--all-types` are independent: junk-directory
+  exclusion always runs first, then the type allowlist (if any).
+
 Register Spotlight mode with hearth the same way, pointing at the other
-entrypoint:
+entrypoint. The tuned defaults (doc-mode filtering, junk exclusion) apply
+automatically — no flags required:
 
 ```json
 [
