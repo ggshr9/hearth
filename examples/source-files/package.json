@@ -1,0 +1,19 @@
+{
+  "name": "@hearth/source-files",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "hearth reference federated province: keyword search over local files (txt/md + Office/PDF).",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "serve": "bun src/server.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "officeparser": "^7.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}
