@@ -28,7 +28,12 @@ export async function extractFile(path: string): Promise<Extracted | null> {
       return { text: String(ast?.toText() ?? ''), isMedia: false };
     }
     if (kind === 'media') return { text: '', isMedia: true };
-    return null;
+    // Unrecognized extension (e.g. source code/config surfaced by --all-types):
+    // best-effort UTF-8 read. Binary files decode with U+FFFD replacement
+    // characters for their invalid byte sequences -> treat as unsupported.
+    const text = await readFile(path, 'utf8');
+    if (text.includes('�')) return null;
+    return { text, isMedia: false };
   } catch (err) {
     process.stderr.write(`[source-files] extract failed for ${path}: ${(err as Error).message}\n`);
     return null;
