@@ -26,7 +26,11 @@ export const DOC_EXTS: readonly string[] = [
   'txt', 'md', 'markdown', 'rtf', 'rtfd', 'odt', 'ods', 'odp', 'csv', 'tex',
 ];
 
-export interface CandidateFilter { exclude?: string[]; allowExts?: string[] | null }
+export interface CandidateFilter {
+  exclude?: string[];
+  /** Note: an empty array `[]` behaves the same as `null`/absent (no type filter) — the guard is `allowExts.length > 0`. */
+  allowExts?: string[] | null;
+}
 
 function extOf(path: string): string {
   const base = path.split('/').pop() ?? '';
@@ -43,10 +47,12 @@ export function filterCandidates(paths: string[], opts?: CandidateFilter): strin
     : null;
   const out: string[] = [];
   for (const p of paths) {
+    const segs = p.split('/');
     let isJunk = false;
-    for (const seg of p.split('/')) {
-      const sl = seg.toLowerCase();
-      if (junk.has(sl) || sl.includes('cache')) { isJunk = true; break; }
+    for (let i = 0; i < segs.length; i++) {
+      const sl = segs[i]!.toLowerCase();
+      const isDir = i < segs.length - 1; // the terminal segment is the filename, not a dir
+      if (junk.has(sl) || (isDir && sl.includes('cache'))) { isJunk = true; break; }
     }
     if (isJunk) continue;
     if (allow && !allow.has(extOf(p))) continue;

@@ -44,3 +44,30 @@ test('DOC_EXTS excludes source-code extensions; JUNK_SEGMENTS covers node_module
   expect(DOC_EXTS).not.toContain('ts'); expect(DOC_EXTS).not.toContain('go');
   expect(JUNK_SEGMENTS.has('node_modules')).toBe(true);
 });
+
+test('terminal filenames containing "cache" are kept — only cache DIRECTORIES are junk', () => {
+  const out = filterCandidates(
+    ['/U/me/Documents/cache-strategy.pdf', '/U/me/Documents/Cache Invalidation Notes.docx'],
+    { allowExts: DOC_EXTS },
+  );
+  expect(out).toEqual([
+    '/U/me/Documents/cache-strategy.pdf',
+    '/U/me/Documents/Cache Invalidation Notes.docx',
+  ]);
+});
+
+test('a cache DIRECTORY segment still drops its contents', () => {
+  const out = filterCandidates(
+    ['/U/me/Documents/data/hf-embedding-cache/vocab.txt'],
+    { allowExts: null },
+  );
+  expect(out).toEqual([]);
+});
+
+test('.cache directory segment is dropped', () => {
+  const out = filterCandidates(
+    ['/U/me/Documents/proj/.cache/x.md'],
+    { allowExts: DOC_EXTS },
+  );
+  expect(out).toEqual([]);
+});
