@@ -199,7 +199,7 @@ export async function runSetup(opts: { hearthRepoRoot: string }): Promise<number
       const { existing, next } = composeMcpConfig(ccPath, { vaultRoot: vault, hearthRepoRoot: opts.hearthRepoRoot });
       const exists = existsSync(ccPath);
       process.stdout.write(`\n  · target: ${ccPath} (${exists ? 'exists' : 'will create'})\n`);
-      if (exists && Object.keys(existing).length === 0) {
+      if (exists && Object.keys(existing as Record<string, unknown>).length === 0) {
         process.stdout.write('    ⚠ existing file is empty/unparseable; would replace.\n');
       }
       const oldHearth = (existing as { servers?: { hearth?: unknown }; mcpServers?: { hearth?: unknown } }).servers?.hearth ?? (existing as { mcpServers?: { hearth?: unknown } }).mcpServers?.hearth;

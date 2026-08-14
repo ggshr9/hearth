@@ -107,5 +107,5 @@ export function validateChangePlan(raw: unknown, ctx: { schema: Schema; vaultRoo
   if (issues.length > 0) {
     throw new PlanValidationError(`plan failed validation (${issues.length} issue${issues.length === 1 ? '' : 's'})`, issues);
   }
-  return raw as ChangePlan;
+  return raw as unknown as ChangePlan;
 }

@@ -170,7 +170,7 @@ export function permits(
   if (!rule) return false;
   const perm = rule[actor];
   if (perm === 'none') return false;
-  if (action === 'read') return perm !== 'none';
+  if (action === 'read') return true; // perm is already known to be non-'none' here
   if (action === 'create') return perm === 'add' || perm === 'rw';
   if (action === 'update') return perm === 'rw';
   if (action === 'delete') return perm === 'rw';

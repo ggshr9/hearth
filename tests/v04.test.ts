@@ -102,8 +102,10 @@ describe('approval token: issue + verify + single-use + expiry', () => {
   it('rejects tampered signature', () => {
     const { token } = issueToken({ change_id: 'cp-6', issued_by: 'test' });
     const [payload, sig] = token.split('.');
-    // Flip a byte in the sig
-    const badSig = sig!.slice(0, -1) + (sig!.slice(-1) === 'A' ? 'B' : 'A');
+    // Tamper the FIRST sig char, not the last: the last base64url char of a
+    // 32-byte HMAC carries only 4 significant bits (2 padding), so flipping it can
+    // be a byte-level no-op ~1/16 of the time. The first char is fully significant.
+    const badSig = (sig!.charAt(0) === 'A' ? 'B' : 'A') + sig!.slice(1);
     expect(() => verifyAndConsume({ token: `${payload}.${badSig}`, change_id: 'cp-6', required_scope: 'low' })).toThrow(/invalid_sig/);
   });
 });

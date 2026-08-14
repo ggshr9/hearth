@@ -1,0 +1,28 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: bun run typecheck
+      # ./tests/ (leading ./) scopes to the root tests/ dir only — a bare
+      # "tests/" is a substring filter that also matches examples/source-files/
+      # tests/, which need the sub-package's deps (officeparser) not installed here.
+      - run: bun test ./tests/
+  source-files:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/source-files
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: bun run typecheck
+      - run: bun test
