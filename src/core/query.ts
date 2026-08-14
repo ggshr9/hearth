@@ -9,6 +9,7 @@
 import { buildClaimIndex, type ClaimRecord } from './citations.ts';
 import { loadSources, type FederatedSource } from './source-registry.ts';
 import { queryFederatedSource } from './federated-client.ts';
+import { filterSourcesForConsumer, consumerCanReadVault, type ResolvedConsumer } from './consumer-registry.ts';
 
 export const NO_ANSWER = 'no answer found in vault';
 
@@ -33,6 +34,13 @@ export interface QueryResult {
   hits: QueryHit[];
   /** When hits is empty, this is the verbatim string callers must show. */
   no_answer_message: typeof NO_ANSWER;
+  /** federatedQuery() only: the source ids it actually consulted, post
+   *  consumer-allowlist filtering. Lets callers (e.g. the audit write in
+   *  mcp-server.ts) report the source list federatedQuery itself used,
+   *  rather than re-reading the source registry a second time — two reads
+   *  of a mutable registry can diverge and make the audit lie. Left
+   *  undefined by plain query(). */
+  sources_consulted?: string[];
 }
 
 function tokenize(text: string): string[] {
@@ -119,14 +127,24 @@ export async function federatedQuery(
     minScore?: number;
     queryFn?: typeof query;
     sourceQueryFn?: (source: FederatedSource, question: string) => Promise<QueryHit[]>;
+    /** Phase 3: the consumer this query is being run on behalf of. `null`
+     *  (default) means the owner — unrestricted vault access + all sources,
+     *  i.e. exactly today's Phase 2a behavior. A ResolvedConsumer gates the
+     *  local vault leg via consumerCanReadVault() and filters the source
+     *  fan-out via filterSourcesForConsumer() *before* any source is
+     *  queried — an ungranted source's sourceQueryFn is never invoked. */
+    consumer?: ResolvedConsumer | null;
   },
 ): Promise<QueryResult> {
   const queryFn = opts?.queryFn ?? query;
   const sourceQueryFn = opts?.sourceQueryFn ?? queryFederatedSource;
+  const consumer = opts?.consumer ?? null;
 
-  const local = queryFn(vaultRoot, question, { limit: opts?.limit, minScore: opts?.minScore }).hits;
+  const local = consumerCanReadVault(consumer)
+    ? queryFn(vaultRoot, question, { limit: opts?.limit, minScore: opts?.minScore }).hits
+    : [];
 
-  const sources = loadSources(opts?.stateDir);
+  const sources = filterSourcesForConsumer(loadSources(opts?.stateDir), consumer);
   const federated: QueryHit[] = [];
   for (const source of sources) {
     try {
@@ -144,5 +162,5 @@ export async function federatedQuery(
     .map(hit => ({ ...hit, match_score: clamp(hit.match_score) }))
     .sort((a, b) => b.match_score - a.match_score);
 
-  return { question, hits, no_answer_message: NO_ANSWER };
+  return { question, hits, no_answer_message: NO_ANSWER, sources_consulted: sources.map(s => s.id) };
 }

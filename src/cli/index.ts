@@ -26,6 +26,7 @@ import { runDoctor, renderDoctorReport } from './doctor.ts';
 import { startReviewServer } from '../review-server.ts';
 import { TunnelManager } from '../tunnel-manager.ts';
 import { startStdioServer } from '../mcp-server.ts';
+import { resolveConsumer, addConsumer, listConsumers, removeConsumer, type ConsumerIdentity } from '../core/consumer-registry.ts';
 import { audit, readAudit, parseSince } from '../core/audit.ts';
 import { issueToken } from '../core/approval-token.ts';
 import { issueCaptureToken } from '../core/capture-token.ts';
@@ -353,6 +354,65 @@ function cmdDoctor(_positionals: string[], values: Record<string, string | boole
   if (!report.ok) process.exit(1);
 }
 
+export function resolveServeConsumer(opts: { id?: string; token?: string; stateDir?: string }): ConsumerIdentity {
+  const id = opts.id?.trim() || undefined;
+  const token = opts.token || undefined;
+  if (!id && !token) return null;                                  // owner-full
+  if (!id || !token) return { denied: 'bad_token', ...(id ? { id } : {}) }; // both required together
+  return resolveConsumer(id, token, opts.stateDir);
+}
+
+export function cmdConsumer(positionals: string[], values: Record<string, string | boolean | undefined>): void {
+  const sub = positionals[0];
+  const stateDir = (values['state-dir'] as string | undefined) ?? undefined;
+
+  if (sub === 'add') {
+    const id = positionals[1];
+    if (!id) fail('consumer add: missing <id>. usage: hearth consumer add <id> --sources <csv|*> [--vault r|none]');
+    if (!/^[A-Za-z0-9._-]+$/.test(id)) fail('consumer add: <id> must match [A-Za-z0-9._-]+ (got "' + id + '")');
+    const rawSources = values.sources as string | undefined;
+    if (rawSources === undefined) fail('consumer add: missing --sources <csv|*> (use --sources "" for no federated sources, --sources "*" for all)');
+    const sources: '*' | string[] = rawSources.trim() === '*' ? '*' : rawSources.split(',').map(s => s.trim()).filter(Boolean);
+    const vault = (values.vault as string | undefined) ?? 'r';
+    if (vault !== 'r' && vault !== 'none') fail(`consumer add: --vault must be r|none (got "${vault}")`);
+    const existed = listConsumers(stateDir).some(c => c.id === id);
+    const { token } = addConsumer({ id, sources, vault, stateDir });
+    const srcLabel = sources === '*' ? '*' : sources.length === 0 ? '(none)' : sources.join(',');
+    process.stdout.write(
+      (existed ? `⚠ consumer "${id}" already existed — its previous token is now INVALID (replaced).\n\n` : '') +
+      `✓ consumer "${id}" added (vault=${vault}, sources=${srcLabel})\n\n` +
+      `token: ${token}\n\n` +
+      `⚠ This token is shown ONLY now — hearth stores only its hash. Save it.\n` +
+      `Wire the consuming app's MCP server to launch hearth with:\n` +
+      `  command: hearth\n  args: ["mcp","serve","--vault","<vault>"]\n` +
+      `  env: { "HEARTH_CONSUMER_ID": "${id}", "HEARTH_CONSUMER_TOKEN": "${token}" }\n` +
+      `(env is preferred over --consumer-token so the token isn't visible in ps.)\n`,
+    );
+    return;
+  }
+
+  if (!sub || sub === 'list') {
+    const list = listConsumers(stateDir);
+    if (list.length === 0) { process.stdout.write('no consumers registered.\n'); return; }
+    process.stdout.write('id                    vault   sources\n');
+    for (const c of list) {
+      const srcs = c.sources === '*' ? '*' : c.sources.join(',');
+      process.stdout.write(`${c.id.padEnd(20)}  ${c.vault.padEnd(6)}  ${srcs}\n`);
+    }
+    return;
+  }
+
+  if (sub === 'rm') {
+    const id = positionals[1];
+    if (!id) fail('consumer rm: missing <id>. usage: hearth consumer rm <id>');
+    const removed = removeConsumer(id, stateDir);
+    process.stdout.write(removed ? `✓ consumer "${id}" removed\n` : `consumer "${id}" not found (nothing removed)\n`);
+    return;
+  }
+
+  fail(`consumer: unknown subcommand "${sub}". expected: add | list | rm`);
+}
+
 async function cmdMcp(positionals: string[], values: Record<string, string | boolean | undefined>): Promise<void> {
   const sub = positionals[0];
   if (sub !== 'serve') fail(`mcp: unknown subcommand "${sub}". expected: serve`);
@@ -362,7 +422,17 @@ async function cmdMcp(positionals: string[], values: Record<string, string | boo
   }
   // No stdout chatter — MCP uses stdout for protocol. Log to stderr only.
   process.stderr.write(`hearth mcp serve: vault=${vault}\n`);
-  await startStdioServer(vault);
+  const consumer = resolveServeConsumer({
+    id: (values.consumer as string | undefined) ?? process.env.HEARTH_CONSUMER_ID,
+    token: (values['consumer-token'] as string | undefined) ?? process.env.HEARTH_CONSUMER_TOKEN,
+    // stateDir omitted → ~/.hearth (same place addConsumer writes)
+  });
+  if (consumer && 'denied' in consumer) {
+    process.stderr.write(`hearth mcp serve: consumer auth failed (${consumer.denied}); serving in DENIED mode (all queries refused)\n`);
+  } else if (consumer) {
+    process.stderr.write(`hearth mcp serve: consumer=${consumer.id} vault=${consumer.vault} sources=${consumer.sources === '*' ? '*' : consumer.sources.join(',')}\n`);
+  }
+  await startStdioServer(vault, consumer);
 }
 
 function cmdLog(positionals: string[], values: Record<string, string | boolean | undefined>): void {
@@ -492,6 +562,9 @@ usage:
   hearth adopt <vault-dir> [--dry-run] [--yes]
   hearth doctor [--vault <dir>]
   hearth mcp serve [--vault <dir>]
+  hearth consumer add <id> --sources <csv|*> [--vault r|none] [--state-dir <dir>]
+  hearth consumer list [--state-dir <dir>]
+  hearth consumer rm <id> [--state-dir <dir>]
   hearth log [--vault <dir>] [--since 7d|24h|30m] [--limit N]
 
 This is the v0.1 deterministic core loop. No LLM yet — mock ingest produces
@@ -524,6 +597,9 @@ async function main(): Promise<void> {
       'state-dir': { type: 'string' },
       ttl: { type: 'string' },
       name: { type: 'string' },
+      consumer: { type: 'string' },
+      'consumer-token': { type: 'string' },
+      sources: { type: 'string' },
     },
     allowPositionals: true,
     strict: false,
@@ -538,6 +614,7 @@ async function main(): Promise<void> {
     case 'adopt': return cmdAdopt(positionals, values);
     case 'doctor': return cmdDoctor(positionals, values);
     case 'mcp': return await cmdMcp(positionals, values);
+    case 'consumer': return cmdConsumer(positionals, values);
     case 'log': return cmdLog(positionals, values);
     case 'review': return await cmdReview(positionals, values);
     case 'capture': return cmdCapture(positionals, values);
@@ -547,4 +624,6 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+if (import.meta.main) {
+  await main();
+}

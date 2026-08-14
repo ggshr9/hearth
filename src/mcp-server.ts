@@ -33,6 +33,7 @@ import {
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { homedir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { loadSchema, schemaVersionHash, schemaLastModified } from './core/schema.ts';
 import { PendingStore } from './core/pending-store.ts';
 import { createKernel } from './core/vault-kernel.ts';
@@ -46,9 +47,17 @@ import { verifyAndConsume, TokenError } from './core/approval-token.ts';
 import { validateChangePlan, PlanValidationError } from './core/plan-validator.ts';
 import { ErrorCode } from './core/types.ts';
 import { AGENT_INSTRUCTIONS } from './core/agent-instructions.ts';
+import { consumerCanReadVault, type ConsumerIdentity } from './core/consumer-registry.ts';
 
 interface ServerContext {
   vaultRoot: string;
+  /**
+   * Phase 3: the authenticated consumer this server process serves.
+   * undefined/null = owner-full (backward-compatible; existing spawns and
+   * the owner's own tools). A ResolvedConsumer scopes the query path; a
+   * DeniedConsumer marker makes every vault_query fail closed.
+   */
+  consumer?: ConsumerIdentity;
   /** Override hearth state dir (pending queue, channel inbox, and the
    *  federated source registry's sources.json). Defaults to ~/.hearth.
    *  Primarily for tests; production stdio startup leaves this unset and
@@ -77,6 +86,12 @@ function jsonContent(obj: unknown): { content: { type: 'text'; text: string }[] 
   return { content: [{ type: 'text', text: JSON.stringify(obj, null, 2) }] };
 }
 
+/** The read/query surface a scoped (non-owner) consumer may ever call.
+ *  Shared by the CallTool gate and the ListTools filter so the two can't
+ *  drift apart — what a consumer is allowed to call must match what it's
+ *  advertised. */
+const CONSUMER_READ_TOOLS = new Set(['vault_query', 'vault_read', 'vault_search']);
+
 function errorContent(code: keyof typeof ErrorCode, message: string, hint?: string): { content: { type: 'text'; text: string }[]; isError: true } {
   return {
     content: [{ type: 'text', text: JSON.stringify({ error: { code, message, ...(hint ? { hint } : {}) } }, null, 2) }],
@@ -91,8 +106,8 @@ export function createMcpServer(ctx: ServerContext): Server {
   );
 
   // ── Tools ────────────────────────────────────────────────────────────────
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    const tools = [
       {
         name: 'vault_search',
         description: 'Search vault wiki pages by keyword (ripgrep over verified claim text).',
@@ -197,8 +212,24 @@ export function createMcpServer(ctx: ServerContext): Server {
           },
         },
       },
-    ],
-  }));
+    ];
+
+    // Phase 3 consumer filter: advertise only the tools a consumer can
+    // actually call, consistent with the CallTool gate above and the
+    // ListResources filter below. Owner (ctx.consumer == null) is
+    // unrestricted; a denied consumer sees nothing; a resolved grant sees
+    // the read/query surface, minus vault_read/vault_search when it has no
+    // vault read grant.
+    const rc = ctx.consumer ?? null;
+    if (rc === null) return { tools };
+    if ('denied' in rc) return { tools: [] };
+    const filtered = tools.filter(t => {
+      if (!CONSUMER_READ_TOOLS.has(t.name)) return false;
+      if ((t.name === 'vault_read' || t.name === 'vault_search') && !consumerCanReadVault(rc)) return false;
+      return true;
+    });
+    return { tools: filtered };
+  });
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const name = req.params.name;
@@ -210,6 +241,34 @@ export function createMcpServer(ctx: ServerContext): Server {
       initiated_by: 'mcp',
       data: { tool: name, args_keys: Object.keys(args) },
     }).catch(() => {});
+
+    // Phase 3 consumer gate. Owner (ctx.consumer == null) is unrestricted.
+    // A third-party consumer is a SCOPED READ client: denied => no tool at
+    // all; a resolved grant => only the read/query surface, and pure vault
+    // reads require vault:'r'. This runs before every tool so no vault-reading
+    // tool (vault_read/vault_search/vault_query) can route around the broker.
+    const gateConsumer = ctx.consumer ?? null;
+    if (gateConsumer !== null) {
+      const denyAudit = (reason: string) =>
+        audit(ctx.vaultRoot, { event: 'query', initiated_by: 'mcp',
+          data: { consumer: ('id' in gateConsumer ? gateConsumer.id : undefined) ?? 'unknown',
+                  denied: true, reason, tool: name } }).catch(() => {});
+      if ('denied' in gateConsumer) {
+        await denyAudit(gateConsumer.denied);
+        return errorContent('PERMISSION_DENIED', `permission denied: ${gateConsumer.denied}`,
+          'This consumer failed authentication; no tool is available.');
+      }
+      if (!CONSUMER_READ_TOOLS.has(name)) {
+        await denyAudit('owner_only_tool');
+        return errorContent('PERMISSION_DENIED',
+          `tool "${name}" is owner-only; consumer "${gateConsumer.id}" may not call it`);
+      }
+      if ((name === 'vault_read' || name === 'vault_search') && !consumerCanReadVault(gateConsumer)) {
+        await denyAudit('no_vault_grant');
+        return errorContent('PERMISSION_DENIED',
+          `consumer "${gateConsumer.id}" has no vault read grant (vault:'none')`);
+      }
+    }
 
     try {
       const schema = loadSchema(ctx.vaultRoot);
@@ -231,17 +290,49 @@ export function createMcpServer(ctx: ServerContext): Server {
 
       if (name === 'vault_query') {
         const question = String(args.question ?? '');
+        const consumer = ctx.consumer ?? null;
+        const qhash = 'sha256:' + createHash('sha256').update(question, 'utf8').digest('hex');
+
+        // Fail-closed: a denied consumer is refused for EVERY query (even
+        // pure-local), and neither the vault nor any source is touched.
+        // (Defense-in-depth: the hoisted consumer gate above already refuses
+        // a denied consumer before this handler is reached, so this branch
+        // is normally unreachable — kept in case that gate is ever bypassed
+        // or this function is called some other way.)
+        if (consumer && 'denied' in consumer) {
+          await audit(ctx.vaultRoot, { event: 'query', initiated_by: 'mcp',
+            data: { consumer: consumer.id ?? 'unknown', denied: true, reason: consumer.denied,
+                    question_sha256: qhash, vault_included: false, sources_consulted: [] } }).catch(() => {});
+          return errorContent('PERMISSION_DENIED', `permission denied: ${consumer.denied}`);
+        }
+
+        const grant = consumer as (import('./core/consumer-registry.ts').ResolvedConsumer | null);
         // Honesty guarantee: federate defaults to off. Absent or false takes
         // the exact same path hearth's local-only query has always taken —
         // no source-registry read, no federated MCP call, nothing that could
         // make vault_query answer with content hearth never verified itself.
         const federate = args.federate === true;
-        const result = federate
-          ? await (ctx.federatedQueryFn ?? federatedQuery)(ctx.vaultRoot, question, { stateDir: stateDirFor(ctx) })
-          : query(ctx.vaultRoot, question);
-        if (result.hits.length === 0) {
-          return { content: [{ type: 'text' as const, text: NO_ANSWER }] };
+        const vaultIncluded = consumerCanReadVault(grant);
+
+        let result;
+        if (federate) {
+          result = await (ctx.federatedQueryFn ?? federatedQuery)(ctx.vaultRoot, question, { stateDir: stateDirFor(ctx), consumer: grant });
+        } else if (vaultIncluded) {
+          result = query(ctx.vaultRoot, question);
+        } else {
+          result = { question, hits: [], no_answer_message: NO_ANSWER };
         }
+        // Report exactly what federatedQuery itself consulted (post
+        // allowlist-filtering) rather than re-reading the source registry a
+        // second time here — two independent reads of a mutable registry
+        // can diverge and make the audit lie about what was queried.
+        const sourcesConsulted = result.sources_consulted ?? [];
+
+        await audit(ctx.vaultRoot, { event: 'query', initiated_by: 'mcp',
+          data: { consumer: grant?.id ?? 'owner', denied: false, question_sha256: qhash,
+                  vault_included: vaultIncluded, sources_consulted: sourcesConsulted } }).catch(() => {});
+
+        if (result.hits.length === 0) return { content: [{ type: 'text' as const, text: NO_ANSWER }] };
         return jsonContent(result);
       }
 
@@ -401,18 +492,46 @@ export function createMcpServer(ctx: ServerContext): Server {
   });
 
   // ── Resources ────────────────────────────────────────────────────────────
-  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
-    resources: [
+  // Same PUBLIC/OWNER_ONLY policy as ReadResourceRequestSchema below, so a
+  // scoped consumer isn't even advertised resources it can't read.
+  const RESOURCE_PUBLIC = new Set(['hearth://agent-instructions']);
+  const RESOURCE_OWNER_ONLY = new Set(['hearth://pending']);
+
+  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    const all = [
       { uri: 'hearth://schema',             mimeType: 'text/markdown', name: 'SCHEMA.md' },
       { uri: 'hearth://vault-map',          mimeType: 'application/json', name: 'Vault map' },
       { uri: 'hearth://pending',            mimeType: 'application/json', name: 'Pending ChangePlans' },
       { uri: 'hearth://lint-report',        mimeType: 'application/json', name: 'Latest lint report' },
       { uri: 'hearth://agent-instructions', mimeType: 'text/markdown', name: 'How to be a good hearth agent' },
-    ],
-  }));
+    ];
+    const rc = ctx.consumer ?? null;
+    if (rc === null) return { resources: all };
+    if ('denied' in rc) return { resources: all.filter(r => RESOURCE_PUBLIC.has(r.uri)) };
+    return {
+      resources: all.filter(r => {
+        if (RESOURCE_PUBLIC.has(r.uri)) return true;
+        if (RESOURCE_OWNER_ONLY.has(r.uri)) return false;
+        return consumerCanReadVault(rc);
+      }),
+    };
+  });
 
   server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
     const uri = req.params.uri;
+    // Phase 3 consumer gate for the resources surface — sibling JSON-RPC
+    // channel on the same broker process; must not route around the tool gate.
+    const rc = ctx.consumer ?? null;
+    if (rc !== null) {
+      const denyAudit = (reason: string) =>
+        audit(ctx.vaultRoot, { event: 'query', initiated_by: 'mcp',
+          data: { consumer: ('id' in rc ? rc.id : undefined) ?? 'unknown', denied: true, reason, resource: uri } }).catch(() => {});
+      if ('denied' in rc) { await denyAudit(rc.denied); throw new Error(`permission denied: ${rc.denied}`); }
+      if (!RESOURCE_PUBLIC.has(uri)) {
+        if (RESOURCE_OWNER_ONLY.has(uri)) { await denyAudit('owner_only_resource'); throw new Error(`permission denied: resource ${uri} is owner-only`); }
+        if (!consumerCanReadVault(rc)) { await denyAudit('no_vault_grant'); throw new Error(`permission denied: consumer "${rc.id}" has no vault read grant`); }
+      }
+    }
     if (uri === 'hearth://schema') {
       const p = join(ctx.vaultRoot, 'SCHEMA.md');
       const text = existsSync(p) ? readFileSync(p, 'utf8') : '(no SCHEMA.md — run `hearth adopt`)';
@@ -488,8 +607,8 @@ function vaultMap(vaultRoot: string): { dirs: { path: string; mdFiles: number }[
   return { dirs: out.sort((a, b) => a.path.localeCompare(b.path)) };
 }
 
-export async function startStdioServer(vaultRoot: string): Promise<void> {
-  const server = createMcpServer({ vaultRoot });
+export async function startStdioServer(vaultRoot: string, consumer?: ConsumerIdentity): Promise<void> {
+  const server = createMcpServer({ vaultRoot, consumer });
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
