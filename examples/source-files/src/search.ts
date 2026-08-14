@@ -34,7 +34,7 @@ export function search(index: IndexRecord[], question: string, limit = 8): Hit[]
     if (coverage === 0) continue;
     let occ = 0;
     for (const t of hay) if (qTokens.has(t)) occ++;
-    scored.push({ rec, score: coverage * 1000 + occ }); // coverage dominates, occurrences tie-break
+    scored.push({ rec, score: coverage * 1_000_000 + Math.min(occ, 999_999) }); // coverage dominates unconditionally, occurrences tie-break within a tier
   }
   scored.sort((a, b) => b.score - a.score);
 
@@ -61,6 +61,11 @@ function snippet(rec: IndexRecord, qTokens: Set<string>): { claim_text: string; 
     let h = 0;
     for (const t of qTokens) if (lt.has(t)) h++;
     if (h > bestHits) { bestHits = h; bestLine = i; }
+  }
+  if (bestHits <= 0) {
+    // No body line contained any query token — this file matched only via
+    // its filename. Cite the filename rather than an arbitrary body line.
+    return { claim_text: `${basename(rec.relPath)} (filename match)`, anchor: rec.relPath };
   }
   const start = Math.max(0, bestLine - 1), end = Math.min(lines.length, bestLine + 2);
   let text = lines.slice(start, end).join(' ').replace(/\s+/g, ' ').trim();

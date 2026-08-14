@@ -53,3 +53,20 @@ test('no-match question returns []', () => {
 test('empty question returns []', () => {
   expect(search([rec('a.md', 'anything')], '   ')).toEqual([]);
 });
+
+test('coverage dominates unconditionally over occurrence count (no overflow into next tier)', () => {
+  const idx = [
+    rec('A.md', Array(1003).fill('forecast').join(' ')), // coverage 1, occ 1003
+    rec('B.md', 'revenue forecast'),                     // coverage 2, occ 2
+  ];
+  const hits = search(idx, 'revenue forecast');
+  expect(hits[0]!.source).toBe('B.md');
+});
+
+test('filename-only match cites the filename, not an unrelated body line', () => {
+  const hits = search([rec('revenue-report.md', 'unrelated content about kittens')], 'revenue');
+  expect(hits.length).toBe(1);
+  expect(hits[0]!.anchor_summary).toBe('revenue-report.md');
+  expect(hits[0]!.claim_text).toContain('revenue-report.md');
+  expect(hits[0]!.claim_text).not.toContain('kittens');
+});
