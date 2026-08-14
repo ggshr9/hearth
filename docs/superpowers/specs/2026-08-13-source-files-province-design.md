@@ -1,7 +1,12 @@
 # Second federated source — the `source-files` province + multi-source broker validation — Design
 
 **Date**: 2026-08-13
-**Status**: Design draft (brainstorm 2026-08-13); execution approved by user ("写 spec，然后执行").
+**Status**: Implemented + validated (2026-08-13). Province at `examples/source-files/`. Multi-source broker validation (§B) PASSED on real subprocesses; §C ranking decision recorded below.
+
+## Validation outcome (2026-08-13)
+
+- **§B broker validation — PASSED (real spawn):** three consumers spawned via `hearth mcp serve --consumer <id>` (isolated HOME) over two file sources (`docsA`/`docsB`). Per-source authorization holds — `a-only`→docsA only, `b-only`→docsB only, `both`→both merged (each `verified_by` its source); wrong token → `PERMISSION_DENIED`. Confirmed both client-side and via the server's `audit.jsonl` (`sources_consulted` per consumer). Federated content never entered the vault.
+- **§C ranking — decision: KEEP flat-merge (no code change).** Observed: on tied `match_score`, merged order follows `sources.json` registration order (swapping entries flips it). But `federatedQuery`'s score-descending stable sort already interleaves by score tier — no cross-tier burying occurs; only the intra-tie lead is registration-ordered. A round-robin tiebreak would not change the tie lead, and true RRF is disproportionate for a genuinely-ambiguous tie order with a single relevance signal. **Behavior documented: at equal score, sources rank in `sources.json` registration order.** Revisit ranking (RRF/relevance) when a real cross-source relevance signal or a larger source set exists.
 **Repo**: `ggshr9/hearth` (the province ships as `examples/source-files/`; a conditional ranking fix touches `src/core/query.ts`). North star + phasing: memory note `hearth-memory-infra`.
 
 ## The direction (context)
