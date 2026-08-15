@@ -45,10 +45,37 @@ test('hitsFromPaths extracts + ranks real temp files, skips unextractable', asyn
   expect(hits[0]!.match_score).toBe(1);
 });
 
-test('mdfind real smoke — runs and returns an array (fail-open if mdfind absent)', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'sf-spot-real-'));
-  const paths = await mdfind('the', { onlyIn: [dir], limit: 5 });
-  expect(Array.isArray(paths)).toBe(true);
+test('mdfind real smoke — wrapper matches raw mdfind on macOS; array/fail-open elsewhere', async () => {
+  // Non-macOS (e.g. the ubuntu CI lane): /usr/bin/mdfind is absent, so mdfind()
+  // fail-opens. Just confirm the wrapper returns an array without throwing — the
+  // match assertion below can only run where mdfind actually exists.
+  if (process.platform !== 'darwin') {
+    expect(Array.isArray(await mdfind('Calculator', { onlyIn: ['/System/Applications'] }))).toBe(true);
+    return;
+  }
+  // CONTROL: run the RAW system mdfind for Calculator.app, independently of our
+  // wrapper. Calculator.app is present on every macOS and system apps are reliably
+  // Spotlight-indexed (unlike a temp dir under /tmp, which Spotlight never indexes).
+  // If even raw mdfind finds nothing, Spotlight indexing is off on this host (some
+  // ephemeral CI runners) → skip: that is a host condition, not a wrapper regression.
+  let rawOut = '';
+  try {
+    const proc = Bun.spawn(['/usr/bin/mdfind', '-onlyin', '/System/Applications', 'Calculator'], { stdout: 'pipe', stderr: 'ignore' });
+    rawOut = await new Response(proc.stdout).text();
+    await proc.exited;
+  } catch { /* mdfind unspawnable — fall through to skip */ }
+  const spotlightFunctional = rawOut.includes('/Calculator.app');
+
+  const hits = await mdfind('Calculator', { onlyIn: ['/System/Applications'], limit: 10 });
+
+  if (!spotlightFunctional) {
+    console.error('[spotlight.test] mdfind smoke: raw mdfind found no /System/Applications/Calculator.app — Spotlight indexing off on this host; skipping (host condition, not a wrapper regression)');
+    return;
+  }
+  // Spotlight IS functional (raw mdfind found Calculator.app), so our wrapper MUST
+  // surface it too. A regression in argv construction, spawn, or output parsing —
+  // the exact things the fake-exec unit tests cannot catch — fails here.
+  expect(hits.some(p => p.endsWith('/Calculator.app'))).toBe(true);
 });
 
 test('displayPath home-relativizes paths under home, but leaves prefix-colliding siblings unchanged', () => {

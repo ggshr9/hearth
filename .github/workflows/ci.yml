@@ -16,7 +16,14 @@ jobs:
       # tests/, which need the sub-package's deps (officeparser) not installed here.
       - run: bun test ./tests/
   source-files:
-    runs-on: ubuntu-latest
+    # Run on macOS too so the Spotlight/mdfind path is actually exercised — on
+    # ubuntu /usr/bin/mdfind is absent and mdfind() fail-opens, so the real code
+    # path never runs there. fail-fast:false so one lane's failure still shows the other.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: examples/source-files
